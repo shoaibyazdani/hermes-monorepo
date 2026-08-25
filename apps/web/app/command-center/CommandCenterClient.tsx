@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
 import { StatusLine } from "@/components/hud/StatusLine";
 import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
@@ -11,6 +11,7 @@ import { JarvisHeader } from "@/components/hud/JarvisHeader";
 import { useAgents } from "@/hooks/useAgents";
 import { useTrading } from "@/hooks/useTrading";
 import { useClock } from "@/hooks/useClock";
+import { useVoiceContext } from "@/components/voice/VoiceProvider";
 
 const FALLBACK_AGENTS: RadarAgent[] = [
   { id: "joy", name: "JOY", status: "idle", x: 200, y: 70 },
@@ -19,14 +20,23 @@ const FALLBACK_AGENTS: RadarAgent[] = [
 ];
 
 export default function CommandCenterClient() {
-  const { agents } = useAgents();
+  const { agents: radarAgents } = useAgents();
   const { trading } = useTrading();
   const { utc } = useClock();
+  const { setAgents } = useVoiceContext();
+
+  // Push the agent list into VoiceContext so @-mention parsing knows the agents.
+  // Strip the radar-only `status/x/y` fields down to { id, name }.
+  useEffect(() => {
+    setAgents(radarAgents.map(({ id, name }) => ({ id, name })));
+  }, [radarAgents, setAgents]);
+
   const [chatOpen, setChatOpen] = useState(false);
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   const [chatAgentName, setChatAgentName] = useState<string>("");
 
-  const radarAgents: RadarAgent[] = agents.length > 0 ? agents : FALLBACK_AGENTS;
+  const displayedAgents: RadarAgent[] =
+    radarAgents.length > 0 ? radarAgents : FALLBACK_AGENTS;
 
   const openChat = (id: string, name: string) => {
     setChatAgentId(id);
@@ -119,9 +129,9 @@ export default function CommandCenterClient() {
         <div className="flex items-center justify-center bg-radial-radial">
           <div className="w-full max-w-[700px]">
             <RadarSVG
-              agents={radarAgents}
+              agents={displayedAgents}
               onAgentClick={(id) => {
-                const a = radarAgents.find((x) => x.id === id);
+                const a = displayedAgents.find((x) => x.id === id);
                 if (a) openChat(a.id, a.name);
               }}
             />
@@ -134,7 +144,7 @@ export default function CommandCenterClient() {
         {/* Right: Notifications + Comms */}
         <div className="flex flex-col gap-3">
           <div className="panel-title">Specialized Agents</div>
-          {radarAgents.map((a) => (
+          {displayedAgents.map((a) => (
             <Panel key={a.id}>
               <div className="flex items-center gap-2">
                 <span
@@ -175,7 +185,7 @@ export default function CommandCenterClient() {
         <StatusLine
           items={[
             { label: "", value: "ONLINE", pulse: true },
-            { label: "AGENTS", value: `${radarAgents.length}` },
+            { label: "AGENTS", value: `${displayedAgents.length}` },
             { label: "MARKETS", value: trading ? "LIVE" : "—" },
             { label: "TIME", value: utc },
           ]}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
 import { StatusLine } from "@/components/hud/StatusLine";
 import { JarvisHeader } from "@/components/hud/JarvisHeader";
+import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
 import { useClock } from "@/hooks/useClock";
 
 interface AgentUsage {
@@ -192,6 +193,7 @@ export default function UsageClient() {
 
       {/* Footer */}
       <div className="flex-none max-w-[1400px] w-full mx-auto px-6 pb-6 animate-glitch">
+        <VoiceInputBar />
         <StatusLine
           items={[
             { label: "", value: "ONLINE", pulse: true },

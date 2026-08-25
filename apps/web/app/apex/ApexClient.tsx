@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
 import { StatusLine } from "@/components/hud/StatusLine";
 import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
@@ -10,11 +10,19 @@ import { JarvisHeader } from "@/components/hud/JarvisHeader";
 import { useTrading } from "@/hooks/useTrading";
 import { useAgents } from "@/hooks/useAgents";
 import { useClock } from "@/hooks/useClock";
+import { useVoiceContext } from "@/components/voice/VoiceProvider";
 
 export default function ApexClient() {
   const { trading } = useTrading();
   const { agents } = useAgents();
   const { utc } = useClock();
+  const { setAgents } = useVoiceContext();
+
+  // Push the agent list into VoiceContext so @-mention parsing knows the agents.
+  useEffect(() => {
+    setAgents(agents.map(({ id, name }) => ({ id, name })));
+  }, [agents, setAgents]);
+
   const [chatOpen, setChatOpen] = useState(false);
   const [chatAgent, setChatAgent] = useState({ id: "", name: "" });
 

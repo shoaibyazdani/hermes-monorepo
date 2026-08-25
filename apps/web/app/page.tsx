@@ -6,11 +6,20 @@ import { RingSystem } from "@/components/hud/RingSystem";
 import { StatusLine } from "@/components/hud/StatusLine";
 import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
 import { TerminalLog } from "@/components/voice/TerminalLog";
+import { useAgents } from "@/hooks/useAgents";
+import { useVoiceContext } from "@/components/voice/VoiceProvider";
 
 export default function JarvisPage() {
   const [seconds, setSeconds] = useState(15591);
   const [ringLabel, setRingLabel] = useState("JARVIS");
   const [ringSub, setRingSub] = useState("Awaiting command");
+  const { agents } = useAgents();
+  const { setAgents } = useVoiceContext();
+
+  // Push agent list into VoiceContext so @-mention parsing works on the landing page.
+  useEffect(() => {
+    setAgents(agents.map(({ id, name }) => ({ id, name })));
+  }, [agents, setAgents]);
 
   // Live uptime counter
   useEffect(() => {
