@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* JARVIS design tokens (CSS variables, exposed for SVG fills/strokes) */
+  --bg-base: #050810;
+  --bg-panel: rgba(8, 14, 26, 0.55);
+  --cyan: #00D9FF;
+  --cyan-dim: rgba(0, 217, 255, 0.15);
+  --cyan-faint: rgba(0, 217, 255, 0.06);
+  --cyan-glow: rgba(0, 217, 255, 0.45);
+  --amber: #FF6B35;
+  --amber-glow: rgba(255, 107, 53, 0.4);
+  --red: #ff3b30;
+  --green: #10b981;
+  --text: #e0f4ff;
+  --text-mute: #94a3b8;
+}
+
+@layer base {
+  html, body {
+    height: 100%;
+  }
+  body {
+    background-color: var(--bg-base);
+    color: var(--text);
+    font-family: var(--font-data);
+    /* Animated particle mesh background — 2 layers */
+    background-image:
+      linear-gradient(rgba(0, 217, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 217, 255, 0.06) 1px, transparent 1px);
+    background-size: 80px 80px, 80px 80px;
+    background-attachment: fixed;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0, 217, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 217, 255, 0.06) 1px, transparent 1px);
+    background-size: 120px 120px, 120px 120px;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+    animation: meshDrift2 35s linear infinite reverse;
+  }
+  @keyframes meshDrift2 {
+    from { background-position: 0 0; }
+    to { background-position: 120px 120px; }
+  }
+}
+
+/* TL + BR corner brackets (the spans cover TR + BL) */
+.panel::before,
+.panel::after {
+  content: '';
+  position: absolute;
+  width: 22px; height: 22px;
+  pointer-events: none;
+}
+.panel::before {
+  top: 6px; left: 6px;
+  border-top: 2px solid var(--cyan);
+  border-left: 2px solid var(--cyan);
+  box-shadow: 0 0 6px var(--cyan-glow);
+}
+.panel::after {
+  bottom: 6px; right: 6px;
+  border-bottom: 2px solid var(--cyan);
+  border-right: 2px solid var(--cyan);
+  box-shadow: 0 0 6px var(--cyan-glow);
+}
