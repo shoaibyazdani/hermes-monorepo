@@ -14,7 +14,7 @@ import { useClock } from "@/hooks/useClock";
 export default function ApexClient() {
   const { trading } = useTrading();
   const { agents } = useAgents();
-  const { utc, pkt } = useClock();
+  const { utc } = useClock();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatAgent, setChatAgent] = useState({ id: "", name: "" });
 
@@ -39,7 +39,10 @@ export default function ApexClient() {
   return (
     <main className="min-h-screen flex flex-col">
       {/* JARVIS header (dramatic, like landing page) */}
-      <JarvisHeader tagline="// APEX · HUMANOID OS // Multi-agent execution view //" />
+      <JarvisHeader
+        tagline="// APEX · HUMANOID OS // Multi-agent execution view //"
+        current="agents"
+      />
 
       {/* Apex headline */}
       <div className="text-center px-6 pt-8 pb-4 font-hud">

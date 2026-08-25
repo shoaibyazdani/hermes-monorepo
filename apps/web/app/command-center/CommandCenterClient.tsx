@@ -21,7 +21,7 @@ const FALLBACK_AGENTS: RadarAgent[] = [
 export default function CommandCenterClient() {
   const { agents } = useAgents();
   const { trading } = useTrading();
-  const { utc, pkt } = useClock();
+  const { utc } = useClock();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   const [chatAgentName, setChatAgentName] = useState<string>("");
@@ -53,24 +53,11 @@ export default function CommandCenterClient() {
         </svg>
       </button>
 
-      {/* JARVIS header (dramatic, like landing page) */}
-      <JarvisHeader tagline="// COMMAND CENTER // Markets · Radar · Specialized Agents //" />
-
-      {/* Topbar — preserved status line */}
-      <div className="flex-none px-6 pb-3 animate-glitch">
-        <div className="flex gap-4 font-data text-xs text-ink-mute justify-end">
-          <span className="flex items-center gap-2 px-2 py-1 bg-black/30 border border-hudcss-cyan-faint rounded">
-            <span className="w-2 h-2 rounded-full bg-hud-green animate-pulse-dot" />
-            Online
-          </span>
-          <span className="flex items-center gap-2 px-2 py-1 bg-black/30 border border-hudcss-cyan-faint rounded">
-            {utc}
-          </span>
-          <span className="flex items-center gap-2 px-2 py-1 bg-black/30 border border-hudcss-cyan-faint rounded">
-            {pkt}
-          </span>
-        </div>
-      </div>
+      {/* JARVIS header (with nav links) */}
+      <JarvisHeader
+        tagline="// COMMAND CENTER // Markets · Radar · Specialized Agents //"
+        current="command"
+      />
 
       {/* Main grid */}
       <div className="flex-1 grid grid-cols-[minmax(280px,1fr)_minmax(420px,1.4fr)_minmax(280px,1fr)] gap-4 px-4 py-2">

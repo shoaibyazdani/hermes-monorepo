@@ -63,7 +63,10 @@ export default function UsageClient() {
   return (
     <main className="min-h-screen flex flex-col">
       {/* JARVIS header (dramatic, like landing page) */}
-      <JarvisHeader tagline="// USAGE STATS // Agent calls, skill mentions, recent activity //" />
+      <JarvisHeader
+        tagline="// USAGE STATS // Agent calls, skill mentions, recent activity //"
+        current="logs"
+      />
 
       {/* Title */}
       <div className="px-6 pt-6 pb-4">

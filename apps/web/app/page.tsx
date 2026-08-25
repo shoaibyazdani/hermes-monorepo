@@ -41,12 +41,30 @@ export default function JarvisPage() {
     <main className="min-h-screen flex flex-col">
       {/* Header */}
       <div className="flex-none px-8 py-7 animate-glitch">
-        <h1 className="font-hud text-4xl font-bold tracking-[0.4em] text-hud-cyan [text-shadow:0_0_12px_var(--cyan-glow)]">
-          J.A.R.V.I.S.
-        </h1>
-        <div className="mt-2 font-data text-[11px] tracking-[0.3em] text-ink-mute uppercase">
-          // Phase 2A on Next.js 14 — ambient layer //
+        <div className="flex flex-col items-center text-center">
+          <h1 className="font-hud text-4xl font-bold tracking-[0.4em] text-hud-cyan [text-shadow:0_0_12px_var(--cyan-glow)]">
+            J.A.R.V.I.S.
+          </h1>
+          <div className="mt-2 font-data text-[11px] tracking-[0.3em] text-ink-mute uppercase">
+            // Phase 2A on Next.js 14 — ambient layer //
+          </div>
         </div>
+        <nav className="mt-6 flex justify-center">
+          <div className="flex gap-1 font-hud text-[11px] tracking-[0.25em] uppercase">
+            <a href="/" className="px-4 py-1.5 border border-hud-cyan text-hud-cyan bg-hud-cyan/10" style={{ textShadow: "0 0 8px var(--cyan-glow)" }}>
+              Dashboard
+            </a>
+            <a href="/command-center" className="px-4 py-1.5 border border-hudcss-cyan-dim text-ink-mute hover:border-hud-cyan hover:text-hud-cyan">
+              Command
+            </a>
+            <a href="/apex" className="px-4 py-1.5 border border-hudcss-cyan-dim text-ink-mute hover:border-hud-cyan hover:text-hud-cyan">
+              Agents
+            </a>
+            <a href="/usage" className="px-4 py-1.5 border border-hudcss-cyan-dim text-ink-mute hover:border-hud-cyan hover:text-hud-cyan">
+              Logs
+            </a>
+          </div>
+        </nav>
       </div>
 
       {/* Layout grid */}
