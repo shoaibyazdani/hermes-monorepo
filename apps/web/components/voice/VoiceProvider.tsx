@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useContext, useState } from "react";
-import { useVoice, VoiceEvent } from "@/hooks/useVoice";
+import { useVoice, VoiceEvent, type VoiceState } from "@/hooks/useVoice";
 
 interface VoiceContextValue {
-  state: ReturnType<typeof useVoice>["state"];
+  state: VoiceState;
   errorMessage: string | null;
   start: () => Promise<boolean>;
   stop: () => void;

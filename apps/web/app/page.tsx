@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
 import { RingSystem } from "@/components/hud/RingSystem";
-import { Typewriter } from "@/components/hud/Typewriter";
 import { StatusLine } from "@/components/hud/StatusLine";
 import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
 import { TerminalLog } from "@/components/voice/TerminalLog";
@@ -19,11 +18,12 @@ export default function JarvisPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Cycle ring center labels every 4s
+  // Cycle ring center labels every 4s. First tick lands on index 0 (the
+  // initial "JARVIS" rendered by useState) so the cycle visits every label.
   useEffect(() => {
     const labels = ["JARVIS", "STANDBY", "ONLINE"];
     const subs = ["Awaiting command", "Systems nominal", "Ready"];
-    let i = 0;
+    let i = -1;
     const interval = setInterval(() => {
       i = (i + 1) % labels.length;
       setRingLabel(labels[i]);

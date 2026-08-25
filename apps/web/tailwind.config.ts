@@ -78,12 +78,7 @@ const config: Config = {
       },
       backgroundImage: {
         "scan-line": "linear-gradient(180deg, transparent 0%, rgba(0, 217, 255, 0.04) 40%, rgba(0, 217, 255, 0.18) 50%, rgba(0, 217, 255, 0.04) 60%, transparent 100%)",
-        "mesh-drift": "linear-gradient(rgba(0, 217, 255, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 217, 255, 0.06) 1px, transparent 1px)",
         "hud-shimmer": "linear-gradient(105deg, transparent 35%, rgba(0, 217, 255, 0.15) 50%, transparent 65%)",
-      },
-      backgroundSize: {
-        mesh: "80px 80px, 80px 80px",
-        "mesh-large": "120px 120px, 120px 120px",
       },
     },
   },

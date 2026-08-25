@@ -1,7 +1,5 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-
 interface RingSystemProps {
   size?: number; // pixels, default 560
   centerLabel: string;
