@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.turbo/
+*.log
+.env
+.env.local
+.env.*.local
+!.env.example
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/
