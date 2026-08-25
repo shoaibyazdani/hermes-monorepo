@@ -7,6 +7,7 @@ import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
 import { TerminalLog } from "@/components/voice/TerminalLog";
 import { RadarSVG, type RadarAgent } from "@/components/hud/RadarSVG";
 import { ChatModal } from "@/components/hud/ChatModal";
+import { JarvisHeader } from "@/components/hud/JarvisHeader";
 import { useAgents } from "@/hooks/useAgents";
 import { useTrading } from "@/hooks/useTrading";
 import { useClock } from "@/hooks/useClock";
@@ -52,36 +53,12 @@ export default function CommandCenterClient() {
         </svg>
       </button>
 
-      {/* Topbar */}
-      <div className="flex-none h-[60px] flex items-center justify-between px-6 bg-bg-panel border border-hudcss-cyan-dim backdrop-blur-xl ar-corners animate-glitch">
-        <div className="flex items-center gap-3">
-          <div className="brand-mark" />
-          <span
-            className="font-hud font-bold text-lg tracking-[0.3em] text-hud-cyan"
-            style={{ textShadow: "0 0 8px var(--cyan-glow)" }}
-          >
-            HERMES
-          </span>
-        </div>
-        <nav className="flex gap-7 font-hud text-sm tracking-[0.15em] uppercase">
-          <a href="/" className="text-ink-mute hover:text-hud-cyan">
-            Dashboard
-          </a>
-          <a
-            href="/command-center"
-            className="text-hud-cyan"
-            style={{ textShadow: "0 0 8px var(--cyan-glow)" }}
-          >
-            Command
-          </a>
-          <a href="/apex" className="text-ink-mute hover:text-hud-cyan">
-            Agents
-          </a>
-          <a href="/usage" className="text-ink-mute hover:text-hud-cyan">
-            Logs
-          </a>
-        </nav>
-        <div className="flex gap-4 font-data text-xs text-ink-mute">
+      {/* JARVIS header (dramatic, like landing page) */}
+      <JarvisHeader tagline="// COMMAND CENTER // Markets · Radar · Specialized Agents //" />
+
+      {/* Topbar — preserved status line */}
+      <div className="flex-none px-6 pb-3 animate-glitch">
+        <div className="flex gap-4 font-data text-xs text-ink-mute justify-end">
           <span className="flex items-center gap-2 px-2 py-1 bg-black/30 border border-hudcss-cyan-faint rounded">
             <span className="w-2 h-2 rounded-full bg-hud-green animate-pulse-dot" />
             Online
