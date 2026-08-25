@@ -272,3 +272,44 @@
   border: 1px solid var(--cyan-dim);
   color: var(--text);
 }
+
+/* === Phase 2 page utilities (lifted from legacy command-center.html) === */
+.panel-title {
+  font-family: var(--font-hud);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--cyan-dim);
+  display: flex; align-items: center; gap: 8px;
+}
+.panel-title::before {
+  content: '▸';
+  color: var(--cyan);
+  animation: titlePulse 1.6s ease-in-out infinite;
+}
+@keyframes titlePulse {
+  0%, 100% { opacity: 1; transform: translateX(0); }
+  50% { opacity: 0.5; transform: translateX(2px); }
+}
+.brand-mark {
+  width: 28px; height: 28px;
+  background: conic-gradient(from 0deg, var(--cyan), var(--amber), var(--cyan));
+  border-radius: 50%;
+  animation: spin 4s linear infinite;
+  box-shadow:
+    0 0 16px var(--cyan-glow),
+    inset 0 0 8px rgba(0, 0, 0, 0.3);
+}
+.ar-corners {
+  clip-path: polygon(
+    14px 0, calc(100% - 14px) 0, 100% 14px,
+    100% calc(100% - 14px), calc(100% - 14px) 100%,
+    14px 100%, 0 calc(100% - 14px), 0 14px
+  );
+}
+.bg-radial-radial {
+  background: radial-gradient(circle at center, rgba(0, 80, 140, 0.25) 0%, transparent 70%);
+}
