@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/format";
+import { DelegationCard } from "./DelegationCard";
 import type {
   Agent,
   ChatMessage,
@@ -155,6 +156,30 @@ export function ChatTimeline({
                       </span>
                     )}
                   </div>
+
+                  {/* Delegations sit above the answer for the same reason as
+                      tools: the work happened first, and it is what licenses
+                      what the synthesis claims. */}
+                  {m.delegations && m.delegations.length > 0 && (
+                    <div className="mt-2">
+                      <p className="t-label mb-1.5">
+                        DELEGATED — {m.delegations.length}{" "}
+                        {m.delegations.length === 1 ? "AGENT" : "AGENTS"}
+                        {m.simulated && (
+                          <span className="ml-1.5 text-hud-amber">
+                            · SIMULATION
+                          </span>
+                        )}
+                      </p>
+                      <ul className="space-y-1.5">
+                        {m.delegations.map((d) => (
+                          <li key={d.stepId}>
+                            <DelegationCard delegation={d} />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {/* Tool activity sits above the text: it happened first,
                       and it is what licenses any claim the text makes. */}

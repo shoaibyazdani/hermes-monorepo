@@ -1,5 +1,18 @@
 import { decodeChunk, type RuntimeEvent } from "./events";
+import type { OrchestrationEvent } from "@/lib/orchestration/events";
 import type { ModelMessage } from "./providers/types";
+
+/**
+ * Everything the stream can carry.
+ *
+ * Orchestration events travel the same NDJSON channel as runtime events; a
+ * consumer branches on `type`. Direct runs emit only runtime events, so an
+ * existing handler keeps working unchanged.
+ */
+export type StreamEvent =
+  | RuntimeEvent
+  | OrchestrationEvent
+  | (RuntimeEvent & { orchestrationId: string; stepId: string });
 
 /**
  * Browser-side runtime client.
@@ -10,6 +23,8 @@ import type { ModelMessage } from "./providers/types";
  */
 
 export interface ExecuteInput {
+  /** "orchestrated" routes through Hermes; anything else is a direct run. */
+  mode?: "direct" | "orchestrated";
   agentId: string;
   conversationId: string;
   message: string;
@@ -20,7 +35,10 @@ export interface ExecuteInput {
 }
 
 export interface ExecuteHandle {
-  /** Stops the run: aborts locally and tells the server to drop the upstream call. */
+  /**
+   * Stops the run: aborts locally and tells the server to drop the upstream
+   * call. For an orchestration this cancels every delegated run beneath it.
+   */
   cancel: () => void;
   /** Resolves when the stream ends, however it ends. */
   done: Promise<void>;
@@ -59,11 +77,13 @@ export async function fetchRuntimeStatus(): Promise<PublicRuntimeStatus> {
  */
 export function executeAgentRun(
   input: ExecuteInput,
-  onEvent: (event: RuntimeEvent) => void,
+  onEvent: (event: StreamEvent) => void,
 ): ExecuteHandle {
   const controller = new AbortController();
   // Captured from the first event so cancellation can reach the server run.
   let runId: string | null = null;
+  // Orchestrations are cancelled by id, which stops every delegation too.
+  let orchestrationId: string | null = null;
   let cancelled = false;
   // True once the server has reported a terminal event, so the fallback below
   // does not emit a second one.
@@ -105,9 +125,21 @@ export function executeAgentRun(
         carry = rest;
 
         for (const event of events) {
-          if (!runId) runId = event.runId;
-          if (event.type === "run.completed") terminal = true;
-          onEvent(event);
+          const e = event as StreamEvent;
+          if ("runId" in e && !runId) runId = e.runId;
+          if ("orchestrationId" in e && e.orchestrationId) {
+            orchestrationId = e.orchestrationId;
+          }
+          // Either union has its own terminal event.
+          if (
+            e.type === "run.completed" ||
+            e.type === "orchestration.completed" ||
+            e.type === "orchestration.failed" ||
+            e.type === "orchestration.cancelled"
+          ) {
+            terminal = true;
+          }
+          onEvent(e);
         }
       }
     } catch (err) {
@@ -142,13 +174,15 @@ export function executeAgentRun(
     cancel: () => {
       cancelled = true;
       controller.abort();
-      // Best-effort: tell the server to abort the provider call too, so a
-      // stopped run stops consuming tokens rather than just being ignored.
-      if (runId) {
+      // Best-effort: tell the server to abort upstream too, so a stopped run
+      // stops consuming tokens rather than just being ignored. Cancelling an
+      // orchestration takes precedence — it stops every delegation as well.
+      const body = orchestrationId ? { orchestrationId } : runId ? { runId } : null;
+      if (body) {
         void fetch("/api/runtime/cancel", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ runId }),
+          body: JSON.stringify(body),
           keepalive: true,
         }).catch(() => {
           // The run ends when the response stream closes regardless.

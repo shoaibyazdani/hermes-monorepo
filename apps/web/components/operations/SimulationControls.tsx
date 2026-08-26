@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Play, RotateCcw, SkipForward } from "lucide-react";
+import { Pause, Play, RotateCcw, SkipForward, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/hud/StatusDot";
 import { useOperations } from "./OperationsProvider";
@@ -27,10 +27,22 @@ export function SimulationControls({
   className,
   indicatorOnly = false,
 }: SimulationControlsProps) {
-  const { live, playing, play, pause, reset, stepForward, step, totalSteps } =
-    useOperations();
+  const {
+    live,
+    playing,
+    play,
+    pause,
+    reset,
+    stepForward,
+    step,
+    totalSteps,
+    cancelSimulation,
+    simulationCancelled,
+  } = useOperations();
 
   const atEnd = step >= totalSteps;
+  // Cancelling only makes sense while a simulated orchestration is running.
+  const canCancel = !live && !simulationCancelled && step > 0 && !atEnd;
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
@@ -92,6 +104,16 @@ export function SimulationControls({
               <SkipForward size={11} strokeWidth={2} aria-hidden />
               <span className="hidden sm:inline">Step</span>
             </TransportButton>
+
+            {canCancel && (
+              <TransportButton
+                onClick={cancelSimulation}
+                label="Cancel simulated orchestration"
+              >
+                <Square size={11} strokeWidth={2} aria-hidden />
+                <span className="hidden sm:inline">Cancel</span>
+              </TransportButton>
+            )}
 
             <TransportButton onClick={reset} label="Reset scenario">
               <RotateCcw size={11} strokeWidth={2} aria-hidden />

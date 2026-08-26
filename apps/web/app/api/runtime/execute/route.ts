@@ -1,6 +1,10 @@
 import { executeAgent, type AgentRequest } from "@/lib/runtime/agent-runtime";
 import { isKnownAgent } from "@/lib/runtime/agents/definitions";
 import { encodeEvent } from "@/lib/runtime/events";
+import {
+  executeOrchestration,
+  type OrchestrationRequest,
+} from "@/lib/orchestration/orchestrator";
 import type { ModelMessage } from "@/lib/runtime/providers/types";
 
 export const dynamic = "force-dynamic";
@@ -21,23 +25,32 @@ const MAX_MISSION_CONTEXT_CHARS = 2_000;
  * agent id is checked against the server-side registry, ids are type-checked,
  * and all free text is length-capped. Nothing is passed through unexamined.
  */
-function parseRequest(body: unknown):
-  | { ok: true; value: AgentRequest }
-  | { ok: false; error: string } {
+type ParsedRequest =
+  | { ok: true; mode: "direct"; value: AgentRequest }
+  | { ok: true; mode: "orchestrated"; value: OrchestrationRequest }
+  | { ok: false; error: string };
+
+function parseRequest(body: unknown): ParsedRequest {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request." };
   }
   const b = body as Record<string, unknown>;
 
-  if (typeof b.agentId !== "string" || !isKnownAgent(b.agentId)) {
-    // Rejected server-side: the browser does not get to name arbitrary agents.
-    return { ok: false, error: "Unknown agent." };
-  }
+  // Mode selects the execution path. Anything unrecognised is a direct run,
+  // so an older client that sends no mode keeps working unchanged.
+  const mode = b.mode === "orchestrated" ? "orchestrated" : "direct";
+
   if (typeof b.conversationId !== "string" || !b.conversationId.trim()) {
     return { ok: false, error: "conversationId is required." };
   }
   if (typeof b.message !== "string" || !b.message.trim()) {
     return { ok: false, error: "message is required." };
+  }
+  // Orchestration is always Hermes; the browser does not choose an
+  // orchestrator, so there is nothing to validate beyond the mode itself.
+  if (mode === "direct" && (typeof b.agentId !== "string" || !isKnownAgent(b.agentId))) {
+    // Rejected server-side: the browser does not get to name arbitrary agents.
+    return { ok: false, error: "Unknown agent." };
   }
 
   // History: keep only the most recent turns, then trim oldest-first until the
@@ -66,10 +79,27 @@ function parseRequest(body: unknown):
     }
   }
 
+  if (mode === "orchestrated") {
+    return {
+      ok: true,
+      mode: "orchestrated",
+      value: {
+        conversationId: b.conversationId,
+        message: b.message.slice(0, MAX_MESSAGE_CHARS),
+        missionId:
+          typeof b.missionId === "string" && b.missionId
+            ? b.missionId
+            : undefined,
+        history,
+      },
+    };
+  }
+
   return {
     ok: true,
+    mode: "direct",
     value: {
-      agentId: b.agentId,
+      agentId: b.agentId as string,
       conversationId: b.conversationId,
       message: b.message.slice(0, MAX_MESSAGE_CHARS),
       missionId:
@@ -115,14 +145,22 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const event of executeAgent(parsed.value)) {
-          controller.enqueue(encoder.encode(encodeEvent(event)));
+        // Both paths emit NDJSON on the same stream; the client branches on
+        // `type`, so orchestration events and runtime events interleave
+        // without a second transport.
+        const source =
+          parsed.mode === "orchestrated"
+            ? executeOrchestration(parsed.value)
+            : executeAgent(parsed.value);
+
+        for await (const event of source) {
+          controller.enqueue(encoder.encode(encodeEvent(event as never)));
         }
       } catch (err) {
         // The generator handles its own failures; reaching here means the
         // stream itself broke. Log server-side, close cleanly client-side.
         console.error("[runtime:route] stream failed", {
-          agentId: parsed.value.agentId,
+          mode: parsed.mode,
           error: err instanceof Error ? err.message : "unknown",
         });
       } finally {

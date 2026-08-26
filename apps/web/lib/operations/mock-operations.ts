@@ -501,3 +501,11 @@ export function getOperationsRuntime(): OperationsRuntime {
 }
 
 export const SCENARIO_MISSION_ID = MISSION_ID;
+
+/**
+ * Step the simulation opens on, shared by every provider that plays it.
+ *
+ * Exported separately so the conversation layer — which owns the step counter
+ * but not the runtime — can initialise to the same position.
+ */
+export const SIMULATION_INITIAL_STEP = mockOperationsRuntime.initialStep;

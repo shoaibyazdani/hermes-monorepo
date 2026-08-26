@@ -506,6 +506,35 @@ export interface ChatMessage {
   errorMessage?: string;
   /** Tool activity shown inline beneath the message. */
   toolCalls?: ChatToolCall[];
+  /** Orchestration this message summarises, when Hermes delegated work. */
+  orchestrationId?: string;
+  /** Delegated steps, rendered as cards above the synthesised answer. */
+  delegations?: ChatDelegation[];
+  /**
+   * True when this turn came from the deterministic simulation rather than a
+   * real run. The transcript labels it, so simulated work is never mistaken
+   * for an agent's actual output.
+   */
+  simulated?: boolean;
+}
+
+/**
+ * One delegated step, as shown in the Hermes conversation.
+ *
+ * Carries the delegated conversation id so the operator can open the agent's
+ * own workspace rather than reading a copy pasted into Hermes's channel.
+ */
+export interface ChatDelegation {
+  stepId: string;
+  agentId: string;
+  task: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  /** The agent's own conversation for this delegation. */
+  conversationId?: string;
+  /** The agent's result, once it has one. */
+  summary?: string;
+  failureReason?: string;
+  durationMs?: number;
 }
 
 /** A tool invocation surfaced in the transcript. */

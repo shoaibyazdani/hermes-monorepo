@@ -17,6 +17,7 @@ import { Meter } from "@/components/hud/Meter";
 import { missionHref } from "@/lib/navigation";
 import { AgentConversation } from "@/components/chat/AgentConversation";
 import { AgentNetwork } from "./AgentNetwork";
+import { SimulationControls } from "@/components/operations/SimulationControls";
 import { AgentCapabilities, AgentTools } from "./AgentCapabilities";
 import {
   AgentConfigPanel,
@@ -62,7 +63,18 @@ export function AgentWorkspace({ agentId }: AgentWorkspaceProps) {
   const { setAgents, setActiveAgentId, activeAgentId } = useVoiceContext();
   // Live operational assignment, from the shared operations store rather than
   // the static mock mission on the agent record.
-  const { missionForAgent, taskForAgent } = useOperations();
+  const { missionForAgent, taskForAgent, live, activeOrchestrations } =
+    useOperations();
+
+  // Only where a simulated orchestration is actually on screen: the transport
+  // has nothing to drive on an agent that is not part of one.
+  const showSimulationTransport =
+    !live &&
+    activeOrchestrations.some(
+      (o) =>
+        o.conversationId.startsWith("simulation-") &&
+        (agentId === "hermes" || o.steps.some((st) => st.agentId === agentId)),
+    );
   const elapsed = useElapsed(agent?.startedAt);
   const channelRef = useRef<HTMLDivElement>(null);
 
@@ -398,6 +410,10 @@ export function AgentWorkspace({ agentId }: AgentWorkspaceProps) {
           stagger={9}
           className="flex flex-col"
           fill
+          // The transport appears where a simulated orchestration is visible,
+          // so the scenario can be driven from the channel showing it rather
+          // than only from Operations.
+          actions={showSimulationTransport ? <SimulationControls /> : undefined}
         >
           <div ref={channelRef} className="flex min-h-0 flex-1 flex-col">
             <AgentConversation agent={agent} className="flex-1" />

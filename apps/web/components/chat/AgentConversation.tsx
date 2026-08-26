@@ -42,6 +42,7 @@ export function AgentConversation({
     streamingConversations,
     cancelRun,
     retryMessage,
+    orchestrate,
   } = useConversations();
   const { activeAgentId } = useVoiceContext();
 
@@ -78,9 +79,15 @@ export function AgentConversation({
       // Create a conversation on demand so a command is never dropped for
       // want of a container.
       const conversationId = activeId ?? startConversation(agent.id).id;
+      // Messages to Hermes go through the orchestrator: it decides whether
+      // specialists are needed. Every other agent runs directly.
+      if (agent.id === "hermes") {
+        orchestrate(conversationId, body);
+        return;
+      }
       void sendMessage(agent.id, conversationId, body);
     },
-    [activeId, agent.id, sendMessage, startConversation],
+    [activeId, agent.id, orchestrate, sendMessage, startConversation],
   );
 
   const handleSelect = useCallback(

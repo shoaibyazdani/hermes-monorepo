@@ -59,6 +59,30 @@ const PHASE_UI: Record<
 };
 
 /**
+ * Decide whether a command should be orchestrated.
+ *
+ * Hermes by name, or no agent named at all with no current target, goes to the
+ * orchestrator. A named specialist — or an existing target — keeps the direct
+ * path, so "Apex, do X" never becomes a delegation.
+ */
+function parseAddress(
+  input: string,
+  agents: Agent[],
+): { orchestrate: boolean; message: string } {
+  const lead = input.match(/^\s*@?([\p{L}\p{N}_-]+)\s*[,:—-]?\s+([\s\S]+)$/u);
+  if (lead) {
+    const name = lead[1].toLowerCase();
+    if (name === "hermes") {
+      return { orchestrate: true, message: lead[2].trim() };
+    }
+    if (agents.some((a) => a.id.toLowerCase() === name || a.name.toLowerCase() === name)) {
+      return { orchestrate: false, message: input };
+    }
+  }
+  return { orchestrate: false, message: input };
+}
+
+/**
  * Suggested commands shown while the channel is idle.
  *
  * Selecting one populates the command line rather than dispatching it: there
@@ -99,7 +123,8 @@ export function VoiceCommandBar() {
     setActiveAgentId,
     target,
   } = useVoiceContext();
-  const { routeCommand } = useConversations();
+  const { routeCommand, orchestrate, startConversation, conversationsFor } =
+    useConversations();
 
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -255,6 +280,23 @@ export function VoiceCommandBar() {
     setMention(null);
 
     void (async () => {
+      // Addressing Hermes, or addressing nobody, means orchestration: Hermes
+      // decides whether the request needs specialists at all. A named
+      // specialist still routes directly, unchanged.
+      const parsed = parseAddress(trimmed, agents);
+      if (parsed.orchestrate) {
+        const hermesConversation =
+          conversationsFor("hermes")[0] ?? startConversation("hermes");
+        setActiveAgentId("hermes");
+        appendRoutedLog({
+          agentId: "hermes",
+          line: `[YOU → HERMES] ${parsed.message}`,
+        });
+        appendLog("[HERMES] Orchestrating — planning delegation.");
+        orchestrate(hermesConversation.id, parsed.message);
+        return;
+      }
+
       const result = await routeCommand(trimmed, agents, activeAgentId);
 
       if (result.agentId) {

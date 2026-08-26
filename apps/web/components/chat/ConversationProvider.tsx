@@ -23,9 +23,15 @@ import {
   fetchRuntimeStatus,
   type ExecuteHandle,
   type PublicRuntimeStatus,
+  type StreamEvent,
 } from "@/lib/runtime/runtime-client";
 import type { RuntimeEvent } from "@/lib/runtime/events";
+import { isOrchestrationEvent } from "@/lib/orchestration/events";
+import { simulationTranscriptAt } from "@/lib/orchestration/simulation-view";
+import { SIM_CONVERSATION_IDS } from "@/lib/orchestration/simulation";
+import { SIMULATION_INITIAL_STEP } from "@/lib/operations/mock-operations";
 import type {
+  ChatDelegation,
   ChatMessage,
   ChatMessageStatus,
   ChatToolCall,
@@ -93,7 +99,17 @@ interface ConversationContextValue {
   /** Re-run a failed assistant turn without duplicating the user's message. */
   retryMessage: (conversationId: string, messageId: string) => void;
   /** Subscribe to raw runtime events — used by OperationsProvider. */
-  subscribeRuntime: (fn: (event: RuntimeEvent) => void) => () => void;
+  subscribeRuntime: (fn: (event: StreamEvent) => void) => () => void;
+  /** Simulation playback position, shared with the operational views. */
+  simulationStep: number;
+  setSimulationStep: React.Dispatch<React.SetStateAction<number>>;
+  /**
+   * Route a request through Hermes rather than to one agent.
+   *
+   * Hermes plans, delegates, collects and synthesises; delegated turns land in
+   * each agent's OWN conversation, and only the summary appears here.
+   */
+  orchestrate: (conversationId: string, body: string) => void;
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null);
@@ -118,6 +134,15 @@ export function ConversationProvider({
   const [hydrated, setHydrated] = useState(false);
   const [activeByAgent, setActiveByAgent] = useState<Record<string, string>>({});
 
+  /**
+   * Playback position of the deterministic simulation.
+   *
+   * Owned here rather than in OperationsProvider because this provider is the
+   * parent: the simulated conversation and the simulated operational state
+   * must be projections of one step, not two counters that can drift.
+   */
+  const [simulationStep, setSimulationStep] = useState(SIMULATION_INITIAL_STEP);
+
   // Guards the persist effect so hydration itself does not trigger a write.
   const skipPersist = useRef(true);
 
@@ -132,7 +157,7 @@ export function ConversationProvider({
   const activeRuns = useRef(new Map<string, ExecuteHandle>());
   const [streamingConversations, setStreamingConversations] = useState<string[]>([]);
   // Raw runtime events, republished for OperationsProvider.
-  const runtimeSubscribers = useRef(new Set<(e: RuntimeEvent) => void>());
+  const runtimeSubscribers = useRef(new Set<(e: StreamEvent) => void>());
 
   useEffect(() => {
     setConversations(loadConversations());
@@ -185,29 +210,60 @@ export function ConversationProvider({
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  /**
+   * The simulated orchestration conversation, merged in read-only.
+   *
+   * Derived from the simulation step rather than persisted: nothing is written
+   * to storage, so a reset genuinely returns to the initial state and no stale
+   * transcript can survive a replay. Only present when no provider is
+   * configured — with a live runtime this is null, so a simulated answer can
+   * never appear alongside real ones.
+   */
+  const simulationConversation = useMemo<Conversation | null>(() => {
+    if (runtimeStatus.live) return null;
+    const messages = simulationTranscriptAt(simulationStep);
+    if (!messages.length) return null;
+    return {
+      id: SIM_CONVERSATION_IDS.hermes,
+      agentId: "hermes",
+      title: "Authentication Investigation (simulated)",
+      createdAt: messages[0].createdAt,
+      updatedAt: messages[messages.length - 1].createdAt,
+      messages,
+    };
+  }, [runtimeStatus.live, simulationStep]);
+
+  const allConversations = useMemo(
+    () =>
+      simulationConversation
+        ? [simulationConversation, ...conversations]
+        : conversations,
+    [simulationConversation, conversations],
+  );
+
   const conversationsFor = useCallback(
     (agentId: string) =>
-      conversations
+      allConversations
         .filter((c) => c.agentId === agentId)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [conversations],
+    [allConversations],
   );
 
   const getConversation = useCallback(
-    (id: string) => conversations.find((c) => c.id === id),
-    [conversations],
+    (id: string) => allConversations.find((c) => c.id === id),
+    [allConversations],
   );
 
   const activeConversationId = useCallback(
     (agentId: string) => {
       const explicit = activeByAgent[agentId];
-      if (explicit && conversations.some((c) => c.id === explicit)) {
+      if (explicit && allConversations.some((c) => c.id === explicit)) {
         return explicit;
       }
       // Fall back to the agent's most recent conversation.
       return conversationsFor(agentId)[0]?.id ?? null;
     },
-    [activeByAgent, conversations, conversationsFor],
+    [activeByAgent, allConversations, conversationsFor],
   );
 
   /**
@@ -316,6 +372,109 @@ export function ConversationProvider({
     [],
   );
 
+  /**
+   * Fold an orchestration event into the Hermes message's delegation cards.
+   *
+   * The cards are the operator's view of what was delegated and how it went;
+   * each links to the agent's own conversation rather than duplicating its
+   * transcript here.
+   */
+  const applyOrchestrationEvent = useCallback(
+    (
+      conversationId: string,
+      messageId: string,
+      event: { type: string; payload: unknown; orchestrationId?: string },
+      cards: Map<string, ChatDelegation>,
+    ) => {
+      const p = event.payload as Record<string, never>;
+      const stepId = (p as { stepId?: string }).stepId;
+
+      switch (event.type) {
+        case "plan.created": {
+          const plan = (p as unknown as { plan: { steps: Array<{ id: string; agentId: string; task: string }> } }).plan;
+          for (const step of plan.steps) {
+            cards.set(step.id, {
+              stepId: step.id,
+              agentId: step.agentId,
+              task: step.task,
+              status: "queued",
+            });
+          }
+          break;
+        }
+        case "delegation.created": {
+          const d = p as unknown as {
+            stepId: string;
+            agentId: string;
+            task: string;
+            delegatedConversationId: string;
+          };
+          cards.set(d.stepId, {
+            ...(cards.get(d.stepId) ?? {
+              stepId: d.stepId,
+              agentId: d.agentId,
+              task: d.task,
+            }),
+            stepId: d.stepId,
+            agentId: d.agentId,
+            task: d.task,
+            status: "running",
+            conversationId: d.delegatedConversationId,
+          });
+          break;
+        }
+        case "step.started": {
+          if (stepId && cards.has(stepId)) {
+            cards.set(stepId, { ...cards.get(stepId)!, status: "running" });
+          }
+          break;
+        }
+        case "step.completed": {
+          const d = p as unknown as {
+            stepId: string;
+            result: { summary: string; durationMs?: number };
+          };
+          const existing = cards.get(d.stepId);
+          if (existing) {
+            cards.set(d.stepId, {
+              ...existing,
+              status: "completed",
+              summary: d.result.summary,
+              durationMs: d.result.durationMs,
+            });
+          }
+          break;
+        }
+        case "step.failed": {
+          const d = p as unknown as { stepId: string; reason: string };
+          const existing = cards.get(d.stepId);
+          if (existing) {
+            cards.set(d.stepId, {
+              ...existing,
+              status: "failed",
+              failureReason: d.reason,
+            });
+          }
+          break;
+        }
+        case "step.cancelled": {
+          if (stepId && cards.has(stepId)) {
+            cards.set(stepId, { ...cards.get(stepId)!, status: "cancelled" });
+          }
+          break;
+        }
+        default:
+          return;
+      }
+
+      patchMessage(conversationId, messageId, {
+        orchestrationId: event.orchestrationId,
+        delegations: [...cards.values()],
+      });
+    },
+    [patchMessage],
+  );
+
   const setStreaming = useCallback((conversationId: string, on: boolean) => {
     setStreamingConversations((prev) =>
       on
@@ -339,7 +498,11 @@ export function ConversationProvider({
       agentId: string,
       conversationId: string,
       message: string,
-      opts: { assistantId?: string; attempt?: number } = {},
+      opts: {
+        assistantId?: string;
+        attempt?: number;
+        mode?: "direct" | "orchestrated";
+      } = {},
     ) => {
       // One run per conversation; starting another supersedes the first.
       activeRuns.current.get(conversationId)?.cancel();
@@ -424,6 +587,7 @@ export function ConversationProvider({
       };
 
       const toolCalls = new Map<string, ChatToolCall>();
+      const delegations = new Map<string, ChatDelegation>();
       let lastRunId: string | null = null;
       let failed = false;
       // Set when the operator stops the run, so the settled state is
@@ -432,14 +596,31 @@ export function ConversationProvider({
 
       const handle = executeAgentRun(
         {
+          mode: opts.mode ?? "direct",
           agentId,
           conversationId,
           message,
           history,
           attempt: opts.attempt ?? 1,
         },
-        (event: RuntimeEvent) => {
-          lastRunId = event.runId;
+        (event: StreamEvent) => {
+          // Orchestration events describe delegation, not this message's text.
+          // They update the delegation cards and are republished for
+          // Operations; the runtime switch below handles only the rest.
+          if (isOrchestrationEvent(event)) {
+            runtimeSubscribers.current.forEach((fn) => fn(event));
+            applyOrchestrationEvent(conversationId, assistantId, event, delegations);
+            return;
+          }
+
+          // A delegated agent's runtime events carry a stepId. They belong to
+          // that agent's own conversation, so they must not append text here.
+          if ("stepId" in event && event.stepId !== "synthesis") {
+            runtimeSubscribers.current.forEach((fn) => fn(event));
+            return;
+          }
+
+          lastRunId = (event as RuntimeEvent).runId;
           // Republish before local handling so operational state tracks the run
           // even when the chat is not on screen.
           runtimeSubscribers.current.forEach((fn) => fn(event));
@@ -559,7 +740,7 @@ export function ConversationProvider({
         );
       });
     },
-    [conversations, patchMessage, setStreaming],
+    [conversations, patchMessage, setStreaming, applyOrchestrationEvent],
   );
 
   const sendMessage = useCallback(
@@ -569,6 +750,13 @@ export function ConversationProvider({
       body: string,
     ): Promise<RouteResult> => {
       const trimmed = body.trim();
+      // The simulated conversation is a read-only projection, not stored
+      // state: a turn written into it would be discarded on the next render.
+      // Redirect to a real conversation instead of silently losing the text.
+      if (conversationId === SIM_CONVERSATION_IDS.hermes) {
+        const real = conversations.find((c) => c.agentId === agentId);
+        conversationId = real?.id ?? startConversation(agentId).id;
+      }
       if (!trimmed) {
         return {
           agentId,
@@ -635,7 +823,48 @@ export function ConversationProvider({
         runtimeReason: result.reason,
       };
     },
-    [markMessage, runAgent, runtimeStatus.live],
+    [markMessage, runAgent, runtimeStatus.live, conversations, startConversation],
+  );
+
+  /**
+   * Send a message to Hermes for orchestration.
+   *
+   * Records the operator turn in the Hermes conversation, then runs the
+   * orchestrator. Delegated work lands in each agent's own conversation; only
+   * the delegation cards and the synthesised answer appear here.
+   */
+  const orchestrate = useCallback(
+    (conversationId: string, body: string) => {
+      const trimmed = body.trim();
+      if (!trimmed) return;
+
+      const message = createMessage(
+        conversationId,
+        "hermes",
+        "operator",
+        trimmed,
+        runtimeStatus.live ? "complete" : "awaiting-runtime",
+      );
+
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                messages: [...c.messages, message],
+                updatedAt: message.createdAt,
+              }
+            : c,
+        ),
+      );
+
+      // Without a provider there is nothing to orchestrate; the operator turn
+      // is stored as awaiting-runtime rather than a plan being invented.
+      if (!runtimeStatus.live) return;
+
+      runAgent("hermes", conversationId, trimmed, { mode: "orchestrated" });
+    },
+    [runAgent, runtimeStatus.live],
   );
 
   /** Stop an in-flight run for one conversation. */
@@ -669,7 +898,7 @@ export function ConversationProvider({
     [conversations, runAgent],
   );
 
-  const subscribeRuntime = useCallback((fn: (event: RuntimeEvent) => void) => {
+  const subscribeRuntime = useCallback((fn: (event: StreamEvent) => void) => {
     runtimeSubscribers.current.add(fn);
     return () => {
       runtimeSubscribers.current.delete(fn);
@@ -742,7 +971,7 @@ export function ConversationProvider({
 
   const value = useMemo<ConversationContextValue>(
     () => ({
-      conversations,
+      conversations: allConversations,
       hydrated,
       conversationsFor,
       getConversation,
@@ -760,9 +989,12 @@ export function ConversationProvider({
       cancelRun,
       retryMessage,
       subscribeRuntime,
+      orchestrate,
+      simulationStep,
+      setSimulationStep,
     }),
     [
-      conversations,
+      allConversations,
       hydrated,
       conversationsFor,
       getConversation,
@@ -780,6 +1012,8 @@ export function ConversationProvider({
       cancelRun,
       retryMessage,
       subscribeRuntime,
+      orchestrate,
+      simulationStep,
     ],
   );
 

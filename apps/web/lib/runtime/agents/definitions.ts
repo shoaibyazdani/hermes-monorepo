@@ -17,6 +17,10 @@ export interface AgentDefinition {
   name: string;
   /** Composed system prompt sent to the model. */
   systemPrompt: string;
+  /** True only for the orchestrator. Workers may never delegate. */
+  orchestrator: boolean;
+  /** True when this agent may receive delegated work. */
+  delegatable: boolean;
 }
 
 /** Behaviour every agent shares. Kept separate so it is stated once. */
@@ -35,20 +39,43 @@ OPERATING RULES
   rather than attempting it.
 `.trim();
 
-/** Per-agent identity and responsibilities. */
-const IDENTITIES: Record<string, { role: string; charter: string }> = {
+/**
+ * Per-agent identity and responsibilities.
+ *
+ * `orchestrator` and `delegatable` are deliberately mutually exclusive here:
+ * Hermes plans and cannot be delegated to, workers execute and cannot plan.
+ */
+const IDENTITIES: Record<
+  string,
+  { role: string; charter: string; orchestrator?: boolean; delegatable?: boolean }
+> = {
   hermes: {
     role: "Orchestrator",
-    charter: `You coordinate the agent network and hold the overall picture of
-system operations. You answer questions about what is running, which agents are
-active, what needs the operator's attention, and how work is progressing.
+    orchestrator: true,
+    delegatable: false,
+    charter: `You coordinate the agent network. You can delegate work to
+specialist agents, monitor what they produce, and synthesise their results into
+a single answer for the operator.
 
-You do not perform specialist work yourself — you route it. When a request
-needs engineering, research, QA, analytics, security or operations work, name
-the agent it belongs to.
+HOW TO DECIDE
+- Answer directly when the request is simple, general, or about the state of
+  the system itself. Delegating a question you can already answer wastes a run.
+- Delegate when the request needs a specialism you do not have: engineering,
+  research, QA, analytics, security or operations work.
+- Split a request into several steps only when the parts are genuinely
+  separable. Two agents doing the same investigation is waste, not rigour.
+- Let independent steps run in parallel. Add a dependency only where one step
+  truly needs another's output.
 
-You cannot currently dispatch work to other agents automatically; delegation is
-operator-driven. Do not claim to have assigned anything.`,
+WHEN SYNTHESISING
+- The findings belong to the agents that produced them. Say which agent found
+  what; never present a delegated finding as your own work.
+- If an agent failed or timed out, say so plainly and reason from what you
+  actually have. Do not fill the gap with a guess.
+- Where the agents disagree, surface the disagreement rather than averaging it
+  into a false consensus.
+- State your confidence honestly, and say what would settle a question you
+  could not resolve.`,
   },
   apex: {
     role: "Engineering",
@@ -149,7 +176,33 @@ export function getAgentDefinition(agentId: string): AgentDefinition | null {
     .filter(Boolean)
     .join("\n");
 
-  return { id: agentId, name, systemPrompt };
+  return {
+    id: agentId,
+    name,
+    systemPrompt,
+    orchestrator: identity.orchestrator === true,
+    // Every agent except the orchestrator may receive delegated work.
+    delegatable: identity.delegatable !== false && identity.orchestrator !== true,
+  };
+}
+
+/**
+ * Agents eligible to receive delegated work.
+ *
+ * The plan validator checks against exactly this list, so an agent that is not
+ * here cannot be named in a plan — including Hermes itself, which must not
+ * delegate to itself.
+ */
+export function listDelegatableAgentIds(): string[] {
+  return Object.keys(IDENTITIES).filter((id) => {
+    const identity = IDENTITIES[id];
+    return identity.delegatable !== false && identity.orchestrator !== true;
+  });
+}
+
+/** True only for the orchestrator. */
+export function isOrchestrator(agentId: string): boolean {
+  return IDENTITIES[agentId]?.orchestrator === true;
 }
 
 /** Agent ids the runtime will accept. Used to validate untrusted input. */

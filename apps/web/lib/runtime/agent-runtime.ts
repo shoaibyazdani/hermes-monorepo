@@ -38,6 +38,11 @@ export interface AgentRequest {
   missionContext?: string;
   /** Retry attempt for the same user turn. */
   attempt?: number;
+  /**
+   * External cancellation, used by the orchestrator so stopping an
+   * orchestration aborts every delegated run beneath it.
+   */
+  signal?: AbortSignal;
 }
 
 /** Maximum tool round-trips before giving up, to bound a looping model. */
@@ -136,6 +141,12 @@ export async function* executeAgent(
     attempt: request.attempt,
   });
   const emit = makeEmitter(run);
+
+  // An external signal (an orchestration being cancelled) aborts this run too.
+  if (request.signal) {
+    if (request.signal.aborted) run.controller.abort();
+    else request.signal.addEventListener("abort", () => run.controller.abort(), { once: true });
+  }
 
   yield emit("run.started", {
     provider: cfg.provider,

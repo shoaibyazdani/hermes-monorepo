@@ -12,6 +12,15 @@ import { getOperationsRuntime } from "@/lib/operations/mock-operations";
 import { isMissionOpen } from "@/lib/operations/event-visuals";
 import { useConversations } from "@/components/chat/ConversationProvider";
 import type { RuntimeEvent } from "@/lib/runtime/events";
+import type { StreamEvent } from "@/lib/runtime/runtime-client";
+import { isOrchestrationEvent } from "@/lib/orchestration/events";
+import type { LiveOrchestration } from "@/lib/orchestration/live-view";
+import { applyOrchestrationEvent } from "@/lib/orchestration/live-view";
+import {
+  simulationCancelledAt,
+  simulationSnapshotAt,
+} from "@/lib/orchestration/simulation-view";
+import { SIM_TOTAL_STEPS } from "@/lib/orchestration/simulation";
 import type {
   AgentStatus,
   AttentionItem,
@@ -37,6 +46,8 @@ interface LocalOverlay {
   liveAgentStatus: Record<string, AgentStatus>;
   /** Events emitted by real runtime activity. */
   runtimeEvents: OperationEvent[];
+  /** Live orchestrations, keyed by id. Empty when nothing is orchestrating. */
+  orchestrations: Record<string, LiveOrchestration>;
 }
 
 const EMPTY_OVERLAY: LocalOverlay = {
@@ -47,6 +58,7 @@ const EMPTY_OVERLAY: LocalOverlay = {
   dismissedAttention: [],
   liveAgentStatus: {},
   runtimeEvents: [],
+  orchestrations: {},
 };
 
 export interface NewMissionInput {
@@ -66,6 +78,12 @@ interface OperationsContextValue {
   live: boolean;
   /** Agent status overrides from live runs. Empty in simulation. */
   liveAgentStatus: Record<string, AgentStatus>;
+  /** Orchestrations currently running, newest first. */
+  activeOrchestrations: LiveOrchestration[];
+  /** Stops the simulated orchestration, preserving completed results. */
+  cancelSimulation: () => void;
+  /** True once the simulated orchestration has been cancelled. */
+  simulationCancelled: boolean;
 
   /* Lookups */
   getMission: (id: string) => Mission | undefined;
@@ -113,22 +131,36 @@ export function OperationsProvider({
   const runtime = useMemo(() => getOperationsRuntime(), []);
   // The conversation layer owns the runtime connection; operations subscribes
   // to its events rather than opening a second one.
-  const { runtimeStatus, subscribeRuntime } = useConversations();
-  const [step, setStep] = useState(runtime.initialStep);
+  // The step is owned by the parent so the simulated conversation and the
+  // simulated operational state are projections of a single counter.
+  const {
+    runtimeStatus,
+    subscribeRuntime,
+    simulationStep: step,
+    setSimulationStep: setStep,
+  } = useConversations();
   const [playing, setPlaying] = useState(false);
+  // Cancelling freezes the simulation at the step it was stopped at, so
+  // completed work stays visible rather than being replaced by a reset.
+  const [simulationCancelled, setSimulationCancelled] = useState(false);
+  const [simulationCancelledAtStep, setSimulationCancelledAtStep] = useState(0);
+
+  // The transport spans whichever script is longer, so the orchestration
+  // simulation can play to completion alongside the operations scenario.
+  const totalSteps = Math.max(runtime.totalSteps, SIM_TOTAL_STEPS);
   const [overlay, setOverlay] = useState<LocalOverlay>(EMPTY_OVERLAY);
 
   // Advance the scripted scenario while playing; stop at the end rather than
   // looping, so "completed" is a state the operator can actually observe.
   useEffect(() => {
     if (!playing) return;
-    if (step >= runtime.totalSteps) {
+    if (step >= totalSteps) {
       setPlaying(false);
       return;
     }
     const id = setTimeout(() => setStep((s) => s + 1), PLAY_INTERVAL_MS);
     return () => clearTimeout(id);
-  }, [playing, step, runtime.totalSteps]);
+  }, [playing, step, totalSteps]);
 
   /**
    * Fold live runtime events into operational state.
@@ -138,10 +170,20 @@ export function OperationsProvider({
    * baseline. A second status source would drift from the runs producing it.
    */
   useEffect(() => {
-    return subscribeRuntime((event: RuntimeEvent) => {
+    return subscribeRuntime((event: StreamEvent) => {
+      // Orchestration events describe delegation structure; runtime events
+      // describe one agent's activity. Both feed the same operational view,
+      // but they are folded differently.
+      if (isOrchestrationEvent(event)) {
+        setOverlay((prev) => applyOrchestrationEvent(prev, event));
+        return;
+      }
+
+      const runtimeEvent = event as RuntimeEvent;
       setOverlay((prev) => {
         const status = { ...prev.liveAgentStatus };
         let opEvent: OperationEvent | null = null;
+        const event = runtimeEvent;
 
         const base = {
           id: event.id,
@@ -232,29 +274,51 @@ export function OperationsProvider({
 
   const snapshot = useMemo(() => runtime.snapshotAt(step), [runtime, step]);
 
+  /**
+   * The orchestration simulation, layered on the same step counter.
+   *
+   * Gated on there being no real provider: with one attached, only genuine
+   * runtime events may appear, so the simulated orchestration is not merely
+   * hidden but never computed. Its events are folded by the same reducer the
+   * live stream uses, so the UI below needs no simulation-specific branch.
+   */
+  const simulationActive = !runtimeStatus.live && !runtime.live;
+
+  const sim = useMemo(() => {
+    if (!simulationActive) return null;
+    return simulationCancelled
+      ? simulationCancelledAt(simulationCancelledAtStep)
+      : simulationSnapshotAt(step);
+  }, [simulationActive, simulationCancelled, simulationCancelledAtStep, step]);
+
   const missions = useMemo(
-    () => [...overlay.createdMissions, ...snapshot.missions],
-    [overlay.createdMissions, snapshot.missions],
+    () => [
+      ...overlay.createdMissions,
+      ...(sim ? [sim.mission] : []),
+      ...snapshot.missions,
+    ],
+    [overlay.createdMissions, sim, snapshot.missions],
   );
 
   const tasks = useMemo(() => {
-    const all = [...snapshot.tasks, ...overlay.createdTasks];
+    const all = [...snapshot.tasks, ...(sim ? sim.tasks : []), ...overlay.createdTasks];
     // Apply operator reassignments over whatever the runtime reported.
     return all.map((t) =>
       overlay.reassignments[t.id]
         ? { ...t, assignedAgentId: overlay.reassignments[t.id] }
         : t,
     );
-  }, [snapshot.tasks, overlay.createdTasks, overlay.reassignments]);
+  }, [snapshot.tasks, sim, overlay.createdTasks, overlay.reassignments]);
 
   const events = useMemo(
     () =>
       [
         ...snapshot.events,
+        ...(sim ? sim.events : []),
         ...overlay.localEvents,
         ...overlay.runtimeEvents,
       ].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
-    [snapshot.events, overlay.localEvents, overlay.runtimeEvents],
+    [snapshot.events, sim, overlay.localEvents, overlay.runtimeEvents],
   );
 
   /**
@@ -353,9 +417,10 @@ export function OperationsProvider({
 
   const play = useCallback(() => {
     // Restarting from the end replays rather than sitting on a finished run.
-    setStep((s) => (s >= runtime.totalSteps ? 0 : s));
+    setStep((s) => (s >= totalSteps ? 0 : s));
+    setSimulationCancelled(false);
     setPlaying(true);
-  }, [runtime.totalSteps]);
+  }, [totalSteps]);
 
   const pause = useCallback(() => setPlaying(false), []);
 
@@ -363,12 +428,27 @@ export function OperationsProvider({
     setPlaying(false);
     setStep(runtime.initialStep);
     setOverlay(EMPTY_OVERLAY);
+    setSimulationCancelled(false);
+    setSimulationCancelledAtStep(0);
   }, [runtime.initialStep]);
+
+  /**
+   * Cancel the simulated orchestration.
+   *
+   * Freezes playback at the current step and projects the cancelled state
+   * from it, so completed results remain visible and only in-flight work is
+   * marked cancelled — the same semantics as cancelling a live run.
+   */
+  const cancelSimulation = useCallback(() => {
+    setPlaying(false);
+    setSimulationCancelledAtStep(step);
+    setSimulationCancelled(true);
+  }, [step]);
 
   const stepForward = useCallback(() => {
     setPlaying(false);
-    setStep((s) => Math.min(s + 1, runtime.totalSteps));
-  }, [runtime.totalSteps]);
+    setStep((s) => Math.min(s + 1, totalSteps));
+  }, [totalSteps]);
 
   /* ── Operator actions ──────────────────────────────────────────────────── */
 
@@ -473,7 +553,17 @@ export function OperationsProvider({
       // A configured provider makes the system genuinely live; otherwise the
       // mock runtime decides, which today means simulation.
       live: runtimeStatus.live || runtime.live,
-      liveAgentStatus: overlay.liveAgentStatus,
+      // Simulated and live statuses share one field. They are mutually
+      // exclusive by construction: `sim` is null whenever a provider is live.
+      liveAgentStatus: sim
+        ? { ...sim.liveAgentStatus, ...overlay.liveAgentStatus }
+        : overlay.liveAgentStatus,
+      activeOrchestrations: [
+        ...Object.values(overlay.orchestrations),
+        ...(sim?.orchestration ? [sim.orchestration] : []),
+      ].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
+      cancelSimulation,
+      simulationCancelled,
       getMission,
       tasksForMission,
       eventsForMission,
@@ -482,7 +572,7 @@ export function OperationsProvider({
       taskForAgent,
       openMissions,
       step,
-      totalSteps: runtime.totalSteps,
+      totalSteps,
       playing,
       play,
       pause,
@@ -499,8 +589,12 @@ export function OperationsProvider({
       attentionItems,
       runtimeStatus.live,
       runtime.live,
-      runtime.totalSteps,
+      totalSteps,
       overlay.liveAgentStatus,
+      overlay.orchestrations,
+      sim,
+      cancelSimulation,
+      simulationCancelled,
       getMission,
       tasksForMission,
       eventsForMission,

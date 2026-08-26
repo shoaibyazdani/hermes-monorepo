@@ -45,6 +45,7 @@ export default function ChatsClient() {
     streamingConversations,
     cancelRun,
     retryMessage,
+    orchestrate,
   } = useConversations();
   const { setAgents, setActiveAgentId, activeAgentId } = useVoiceContext();
 
@@ -144,9 +145,14 @@ export default function ChatsClient() {
     (body: string) => {
       if (!agent) return;
       const conversationId = activeId ?? startConversation(agent.id).id;
+      // Hermes orchestrates; specialists run directly.
+      if (agent.id === "hermes") {
+        orchestrate(conversationId, body);
+        return;
+      }
       void sendMessage(agent.id, conversationId, body);
     },
-    [agent, activeId, sendMessage, startConversation],
+    [agent, activeId, orchestrate, sendMessage, startConversation],
   );
 
   const handleCreate = useCallback(() => {

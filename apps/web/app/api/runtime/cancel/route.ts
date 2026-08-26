@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cancelRun } from "@/lib/runtime/run-manager";
+import { cancelOrchestration } from "@/lib/orchestration/orchestrator";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +19,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
 
-  const runId =
-    typeof body === "object" && body !== null
-      ? (body as { runId?: unknown }).runId
-      : undefined;
+  const b = (typeof body === "object" && body !== null ? body : {}) as {
+    runId?: unknown;
+    orchestrationId?: unknown;
+  };
 
-  if (typeof runId !== "string" || !runId) {
-    return NextResponse.json({ error: "runId is required." }, { status: 400 });
+  // Cancelling an orchestration aborts every delegated run beneath it;
+  // completed results are preserved on their steps.
+  if (typeof b.orchestrationId === "string" && b.orchestrationId) {
+    return NextResponse.json({
+      cancelled: cancelOrchestration(b.orchestrationId),
+      scope: "orchestration",
+    });
   }
 
-  const cancelled = cancelRun(runId);
-  return NextResponse.json({ cancelled });
+  if (typeof b.runId === "string" && b.runId) {
+    return NextResponse.json({ cancelled: cancelRun(b.runId), scope: "run" });
+  }
+
+  return NextResponse.json(
+    { error: "runId or orchestrationId is required." },
+    { status: 400 },
+  );
 }
