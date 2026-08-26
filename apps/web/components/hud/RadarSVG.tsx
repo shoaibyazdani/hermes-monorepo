@@ -1,42 +1,42 @@
 "use client";
 
-import { AgentDot, AgentStatus } from "./AgentDot";
+import { AgentDot } from "./AgentDot";
+import type { Agent } from "@/lib/types";
 
-export interface RadarAgent {
-  id: string;
-  name: string;
-  status: AgentStatus;
-  x: number; // 0-400 within the 400x400 viewBox
-  y: number; // 0-400
-}
+/** Agents plottable on the radar — those carrying viewBox coordinates. */
+export type RadarAgent = Agent & { x: number; y: number };
 
 interface RadarSVGProps {
-  agents: RadarAgent[];
+  agents: Agent[];
   onAgentClick?: (id: string) => void;
 }
 
+/** Agents without coordinates cannot be plotted; drop them. */
+function plottable(agents: Agent[]): RadarAgent[] {
+  return agents.filter(
+    (a): a is RadarAgent => typeof a.x === "number" && typeof a.y === "number",
+  );
+}
+
 export function RadarSVG({ agents, onAgentClick }: RadarSVGProps) {
+  const plotted = plottable(agents);
+
   return (
     <svg
-      className="radar-svg"
+      className="radar-svg h-full w-full"
       viewBox="0 0 400 400"
       xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label={`Agent radar — ${plotted.length} agents plotted`}
     >
       <defs>
         <radialGradient id="sweep-gradient" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="rgba(0, 212, 255, 0.4)" />
           <stop offset="100%" stopColor="rgba(0, 212, 255, 0)" />
         </radialGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="2" result="coloredBlur" />
-          <feMerge>
-            <feMergeNode in="coloredBlur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
       </defs>
 
-      {/* Outer compass ring + 4 major rings */}
+      {/* Rings */}
       <circle className="ring major" cx="200" cy="200" r="190" />
       <circle className="ring major" cx="200" cy="200" r="160" />
       <circle className="ring major" cx="200" cy="200" r="120" />
@@ -47,8 +47,8 @@ export function RadarSVG({ agents, onAgentClick }: RadarSVGProps) {
       <line className="cross" x1="10" y1="200" x2="390" y2="200" />
       <line className="cross" x1="200" y1="10" x2="200" y2="390" />
 
-      {/* Corner brackets (TL, TR, BR, BL) */}
-      <g className="corner-brackets">
+      {/* Corner brackets */}
+      <g>
         <polyline className="corner-bracket" points="20,40 20,20 40,20" />
         <polyline className="corner-bracket" points="360,20 380,20 380,40" />
         <polyline className="corner-bracket" points="380,360 380,380 360,380" />
@@ -74,18 +74,24 @@ export function RadarSVG({ agents, onAgentClick }: RadarSVGProps) {
 
       {/* Pulse rings */}
       <circle className="pulse-circle" cx="200" cy="200" r="50" />
-      <circle className="pulse-circle" cx="200" cy="200" r="50" style={{ animationDelay: "1.5s" }} />
+      <circle
+        className="pulse-circle"
+        cx="200"
+        cy="200"
+        r="50"
+        style={{ animationDelay: "1.5s" }}
+      />
 
       {/* Agent dots */}
       <g>
-        {agents.map((a) => (
+        {plotted.map((a) => (
           <AgentDot
             key={a.id}
             x={a.x}
             y={a.y}
             status={a.status}
             label={a.name}
-            onClick={() => onAgentClick?.(a.id)}
+            onClick={onAgentClick ? () => onAgentClick(a.id) : undefined}
           />
         ))}
       </g>

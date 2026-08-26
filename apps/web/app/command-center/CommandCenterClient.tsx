@@ -2,205 +2,255 @@
 
 import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
-import { StatusLine } from "@/components/hud/StatusLine";
-import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
-import { TerminalLog } from "@/components/voice/TerminalLog";
-import { RadarSVG, type RadarAgent } from "@/components/hud/RadarSVG";
+import { DataRow } from "@/components/hud/DataRow";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { RadarSVG } from "@/components/hud/RadarSVG";
 import { ChatModal } from "@/components/hud/ChatModal";
-import { JarvisHeader } from "@/components/hud/JarvisHeader";
-import { useAgents } from "@/hooks/useAgents";
+import { AgentIndicator } from "@/components/agents/AgentIndicator";
+import { AgentActivity } from "@/components/agents/AgentActivity";
+import { OperationsList } from "@/components/telemetry/OperationsList";
+import { TerminalLog } from "@/components/voice/TerminalLog";
+import { useAgents, useAgentNameLookup } from "@/hooks/useAgents";
 import { useTrading } from "@/hooks/useTrading";
-import { useClock } from "@/hooks/useClock";
 import { useVoiceContext } from "@/components/voice/VoiceProvider";
+import { agentStatusVisual } from "@/lib/agent-status";
+import { getMockActivity } from "@/lib/mock/activity";
+import { getMockMissions } from "@/lib/mock/missions";
 
-const FALLBACK_AGENTS: RadarAgent[] = [
-  { id: "joy", name: "JOY", status: "idle", x: 200, y: 70 },
-  { id: "quant", name: "QUANT", status: "idle", x: 70, y: 200 },
-  { id: "sentinel", name: "SENTINEL", status: "idle", x: 330, y: 200 },
-];
+const ACTIVITY = getMockActivity();
+const MISSIONS = getMockMissions();
 
+/**
+ * Live Operations — the real-time situational view.
+ *
+ * Radar plot of the agent network, market feed from `/api/trading`, live
+ * mission traffic and the comms channel. Distinct from the Command Center at
+ * `/`, which is the overview; this is the moment-to-moment picture.
+ */
 export default function CommandCenterClient() {
-  const { agents: radarAgents } = useAgents();
-  const { trading } = useTrading();
-  const { utc } = useClock();
-  const { setAgents } = useVoiceContext();
+  const { agents, error: agentsError } = useAgents();
+  const { trading, error: tradingError } = useTrading();
+  const { setAgents, setActiveAgentId } = useVoiceContext();
+  const agentName = useAgentNameLookup(agents);
 
-  // Push the agent list into VoiceContext so @-mention parsing knows the agents.
-  // Strip the radar-only `status/x/y` fields down to { id, name }.
+  const [chatAgent, setChatAgent] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+
   useEffect(() => {
-    setAgents(radarAgents.map(({ id, name }) => ({ id, name })));
-  }, [radarAgents, setAgents]);
+    setAgents(agents.map(({ id, name }) => ({ id, name })));
+  }, [agents, setAgents]);
 
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
-  const [chatAgentName, setChatAgentName] = useState<string>("");
-
-  const displayedAgents: RadarAgent[] =
-    radarAgents.length > 0 ? radarAgents : FALLBACK_AGENTS;
-
-  const openChat = (id: string, name: string) => {
-    setChatAgentId(id);
-    setChatAgentName(name);
-    setChatOpen(true);
+  const openChat = (id: string) => {
+    const agent = agents.find((a) => a.id === id);
+    if (!agent) return;
+    setActiveAgentId(agent.id);
+    setChatAgent({ id: agent.id, name: agent.name });
   };
 
-  return (
-    <main className="min-h-screen flex flex-col">
-      {/* Legacy Live Talk launcher pill — kept for Phase 1 compat (test contract).
-          Voice activation is now handled by VoiceInputBar / ChatModal; this hidden
-          button exists so legacy scripts/CSS that look for #ltLauncher still work. */}
-      <button
-        id="ltLauncher"
-        hidden
-        title="Open Live Talk"
-        aria-hidden="true"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" y1="19" x2="12" y2="23" />
-          <line x1="8" y1="23" x2="16" y2="23" />
-        </svg>
-      </button>
+  const liveCount = agents.filter((a) => agentStatusVisual(a.status).live).length;
+  const activeMissions = MISSIONS.filter(
+    (m) => m.status === "active" || m.status === "blocked",
+  );
 
-      {/* JARVIS header (with nav links) */}
-      <JarvisHeader
-        tagline="// COMMAND CENTER // Markets · Radar · Specialized Agents //"
-        current="command"
+  return (
+    <div className="flex min-h-full flex-col">
+      {/* Legacy Live Talk launcher — retained for Phase 1 compatibility. Voice
+          activation is handled by VoiceCommandBar / ChatModal; this hidden
+          button exists so legacy scripts that look for #ltLauncher still find it. */}
+      <button id="ltLauncher" hidden aria-hidden="true" tabIndex={-1} />
+
+      <PageHeader
+        title="Live Operations"
+        subtitle="Agent radar · market feed · mission traffic"
+        meta={[
+          { label: "PLOTTED", value: `${agents.length}` },
+          { label: "LIVE", value: `${liveCount}` },
+          { label: "FEED", value: trading ? "ONLINE" : "—" },
+        ]}
       />
 
-      {/* Main grid */}
-      <div className="flex-1 grid grid-cols-[minmax(280px,1fr)_minmax(420px,1.4fr)_minmax(280px,1fr)] gap-4 px-4 py-2">
-        {/* Left: Trading */}
+      <div className="grid flex-1 grid-cols-1 gap-3 p-3 sm:p-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)]">
+        {/* ── Markets ────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
-          <div className="panel-title">Markets</div>
-          {trading?.prices.map((p) => (
-            <Panel key={p.symbol}>
-              <div className="font-data">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-hud text-xs text-ink-mute uppercase tracking-[0.2em]">
-                    {p.symbol}
-                  </span>
+          <Panel
+            title="Markets"
+            eyebrow={trading ? `${trading.prices.length} PAIRS` : "SYNCING"}
+            status={tradingError ? "warn" : "active"}
+            statusLive={!tradingError && Boolean(trading)}
+            stagger={0}
+          >
+            {tradingError && (
+              <p className="t-meta mb-2 text-hud-amber">
+                Feed unavailable ({tradingError}).
+              </p>
+            )}
+            {!trading ? (
+              <p className="t-meta py-6">Awaiting market feed…</p>
+            ) : trading.prices.length === 0 ? (
+              <p className="t-meta py-6">No instruments tracked.</p>
+            ) : (
+              <ul className="space-y-3">
+                {trading.prices.map((p) => {
+                  const up = p.changePct >= 0;
+                  return (
+                    <li
+                      key={p.symbol}
+                      className="border-b border-line-soft pb-3 last:border-b-0 last:pb-0"
+                    >
+                      <div className="flex items-baseline justify-between">
+                        <span className="t-label">{p.symbol}</span>
+                        <span
+                          className={
+                            "font-data text-[11px] font-semibold tabular-nums " +
+                            (up ? "text-hud-green" : "text-hud-red")
+                          }
+                        >
+                          {up ? "+" : ""}
+                          {p.changePct.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div
+                        className={
+                          "t-metric mt-1 " +
+                          (up ? "text-hud-green" : "text-hud-red")
+                        }
+                      >
+                        ${p.price.toFixed(2)}
+                      </div>
+                      <div className="t-timestamp mt-1">
+                        {up ? "+" : ""}
+                        {p.change.toFixed(2)} absolute
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel title="Portfolio" eyebrow="USD" status="info" stagger={1}>
+            {trading ? (
+              <>
+                <div className="t-metric text-hud-cyan">
+                  ${trading.balance.total.toFixed(2)}
                 </div>
-                <div
-                  className={`text-4xl font-bold tabular-nums ${
-                    p.changePct >= 0 ? "text-hud-green" : "text-hud-red"
-                  }`}
-                  style={{
-                    textShadow:
-                      p.changePct >= 0
-                        ? "0 0 12px rgba(16,185,129,0.4)"
-                        : "0 0 12px rgba(255,59,48,0.4)",
-                  }}
-                >
-                  ${p.price.toFixed(2)}
-                </div>
-                <div
-                  className={`text-sm font-semibold mt-1 ${
-                    p.changePct >= 0 ? "text-hud-green" : "text-hud-red"
-                  }`}
-                >
-                  {p.changePct >= 0 ? "+" : ""}
-                  {p.change.toFixed(2)} ({p.changePct.toFixed(2)}%)
-                </div>
-              </div>
-            </Panel>
-          ))}
-          <div className="panel-title">Portfolio</div>
-          <Panel>
-            <div className="font-data">
-              <div className="text-xs text-amber uppercase tracking-[0.2em] font-hud font-semibold">
-                Total Balance (USD)
-              </div>
-              <div
-                className="text-2xl font-bold tabular-nums text-amber"
-                style={{ textShadow: "0 0 12px var(--amber-glow)" }}
-              >
-                ${trading?.balance.total.toFixed(2) ?? "—"}
-              </div>
-              <div className="text-sm text-hud-green mt-1">
-                P&amp;L: +${trading?.balance.pnl.toFixed(2) ?? "—"}
-              </div>
-            </div>
+                <DataRow
+                  label="Unrealised P&L"
+                  value={`${trading.balance.pnl >= 0 ? "+" : ""}$${trading.balance.pnl.toFixed(2)}`}
+                  tone={trading.balance.pnl >= 0 ? "positive" : "negative"}
+                  className="mt-2"
+                  divider
+                />
+                <DataRow
+                  label="Open positions"
+                  value={`${trading.trades.length}`}
+                  tone="muted"
+                />
+              </>
+            ) : (
+              <p className="t-meta py-4">Awaiting balance…</p>
+            )}
+          </Panel>
+
+          <Panel
+            title="Recent Trades"
+            eyebrow={trading ? `${trading.trades.length}` : "—"}
+            stagger={2}
+            className="flex-1"
+          >
+            {!trading || trading.trades.length === 0 ? (
+              <p className="t-meta py-4">No trades executed.</p>
+            ) : (
+              <ul>
+                {trading.trades.map((t, i) => (
+                  <li key={`${t.symbol}-${i}`}>
+                    <DataRow
+                      label={`${t.side.toUpperCase()} ${t.symbol}`}
+                      value={`${t.amount}`}
+                      aside={`${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}`}
+                      tone={t.side === "buy" ? "positive" : "negative"}
+                      divider
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
           </Panel>
         </div>
 
-        {/* Center: Radar */}
-        <div className="flex items-center justify-center bg-radial-radial">
-          <div className="w-full max-w-[700px]">
-            <RadarSVG
-              agents={displayedAgents}
-              onAgentClick={(id) => {
-                const a = displayedAgents.find((x) => x.id === id);
-                if (a) openChat(a.id, a.name);
-              }}
-            />
-            <div className="text-center mt-4 font-hud text-xs tracking-[0.3em] text-ink-mute uppercase">
-              Listening
-            </div>
+        {/* ── Radar ──────────────────────────────────────────────────── */}
+        <Panel
+          title="Agent Radar"
+          eyebrow="NETWORK PLOT"
+          status={agentsError ? "warn" : "active"}
+          statusLive={!agentsError}
+          brackets
+          stagger={3}
+          className="lg:col-span-2 xl:col-span-1"
+          footer={
+            <p className="t-timestamp">
+              Select a plotted agent to open its command channel.
+            </p>
+          }
+        >
+          <div className="bg-radial-radial mx-auto aspect-square w-full max-w-[520px]">
+            <RadarSVG agents={agents} onAgentClick={openChat} />
           </div>
-        </div>
 
-        {/* Right: Notifications + Comms */}
+          <ul className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+            {agents.map((a) => (
+              <li key={a.id}>
+                <AgentIndicator agent={a} showStatus />
+              </li>
+            ))}
+          </ul>
+        </Panel>
+
+        {/* ── Traffic ────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
-          <div className="panel-title">Specialized Agents</div>
-          {displayedAgents.map((a) => (
-            <Panel key={a.id}>
-              <div className="flex items-center gap-2">
-                <span
-                  className="text-xl"
-                  style={{ filter: `drop-shadow(0 0 8px var(--cyan))` }}
-                >
-                  ◆
-                </span>
-                <span className="flex-1 font-hud text-sm font-semibold tracking-[0.05em]">
-                  {a.name}
-                </span>
-                <span
-                  className={`font-hud text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-[0.1em] ${
-                    a.status === "working"
-                      ? "bg-hud-green/20 text-hud-green"
-                      : a.status === "sleeping"
-                      ? "bg-[#818cf8]/20 text-[#818cf8]"
-                      : a.status === "error"
-                      ? "bg-hud-red/20 text-hud-red"
-                      : "bg-hudcss-cyan-faint text-ink-mute"
-                  }`}
-                >
-                  {a.status}
-                </span>
-              </div>
-            </Panel>
-          ))}
-          <div className="panel-title">Comms Log</div>
-          <Panel>
+          <Panel
+            title="Mission Traffic"
+            eyebrow={`${activeMissions.length} IN FLIGHT`}
+            status={
+              activeMissions.some((m) => m.status === "blocked")
+                ? "warn"
+                : "active"
+            }
+            statusLive
+            stagger={4}
+          >
+            <OperationsList
+              missions={activeMissions}
+              agentName={agentName}
+              limit={3}
+            />
+          </Panel>
+
+          <Panel title="Event Stream" eyebrow="LIVE" status="info" stagger={5}>
+            <AgentActivity events={ACTIVITY} agentName={agentName} limit={5} />
+          </Panel>
+
+          <Panel
+            title="Comms"
+            eyebrow="CHANNEL"
+            status="info"
+            stagger={6}
+            className="flex-1"
+          >
             <TerminalLog />
           </Panel>
         </div>
       </div>
 
-      {/* Footer / voice bar */}
-      <div className="flex-none max-w-[1400px] w-full mx-auto mt-4 px-6 pb-5 animate-glitch">
-        <VoiceInputBar />
-        <StatusLine
-          items={[
-            { label: "", value: "ONLINE", pulse: true },
-            { label: "AGENTS", value: `${displayedAgents.length}` },
-            { label: "MARKETS", value: trading ? "LIVE" : "—" },
-            { label: "TIME", value: utc },
-          ]}
-        />
-      </div>
-
-      {/* Chat modal */}
-      {chatOpen && chatAgentId && (
+      {chatAgent && (
         <ChatModal
-          open={chatOpen}
-          agentId={chatAgentId}
-          agentName={chatAgentName}
-          onClose={() => setChatOpen(false)}
+          open
+          agentId={chatAgent.id}
+          agentName={chatAgent.name}
+          onClose={() => setChatAgent(null)}
         />
       )}
-    </main>
+    </div>
   );
 }

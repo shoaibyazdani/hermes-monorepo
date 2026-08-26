@@ -12,6 +12,6 @@
     "build": "pnpm --filter web build",
     "start": "pnpm --filter web start",
     "lint": "pnpm --filter web lint",
-    "test": "echo 'tests run via /tmp/test_*.py'"
+    "test": "pnpm --filter web test"
   }
 }

@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test --experimental-strip-types --import ./lib/runtime/__tests__/resolve-ts.mjs \"lib/**/__tests__/*.test.mjs\""
   },
   "dependencies": {
     "next": "14.2.15",

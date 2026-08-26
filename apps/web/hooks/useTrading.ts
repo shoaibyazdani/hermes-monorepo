@@ -47,9 +47,13 @@ export function useTrading(): TradingState {
         if (!cancelled) {
           setState({ trading: data.trading || EMPTY, loading: false, error: null });
         }
-      } catch (e: any) {
+      } catch (e) {
         if (!cancelled) {
-          setState((s) => ({ ...s, loading: false, error: e?.message ?? "fetch failed" }));
+          setState((s) => ({
+            ...s,
+            loading: false,
+            error: e instanceof Error ? e.message : "fetch failed",
+          }));
         }
       }
     }

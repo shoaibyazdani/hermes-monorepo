@@ -1,7 +1,15 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useVoice, VoiceEvent, type VoiceState } from "@/hooks/useVoice";
+import type { VoicePhase, VoiceTarget } from "@/lib/types";
 
 export interface Agent {
   id: string;
@@ -15,14 +23,30 @@ interface RoutedLogEntry {
 }
 
 interface VoiceContextValue {
+  /** Engine-level mic state. */
   state: VoiceState;
+  /**
+   * Presentation-level phase, which is what the command bar renders.
+   *
+   * Derived from the engine state today. Once transcription lands, the
+   * `processing` and `speaking` phases will be driven by the pipeline rather
+   * than set manually — the UI already handles them.
+   */
+  phase: VoicePhase;
+  /** Manually set the phase. Reserved for the future transcription pipeline. */
+  setPhase: (phase: VoicePhase | null) => void;
+  /** Latest mic RMS level, 0-1. Drives the waveform. 0 when not listening. */
+  level: number;
   errorMessage: string | null;
   start: () => Promise<boolean>;
   stop: () => void;
   log: string[];
   appendLog: (line: string) => void;
-  /** Currently active agent id (set by @-mention). null = broadcast to all. */
+  /** Currently targeted agent (set by @-mention). null = broadcast to all. */
   activeAgentId: string | null;
+  setActiveAgentId: (id: string | null) => void;
+  /** Resolved target for display: agent name, or "ALL". */
+  target: VoiceTarget;
   /** All agents known to the system (set by the page; used for @-mention parsing). */
   agents: Agent[];
   setAgents: (agents: Agent[]) => void;
@@ -35,54 +59,103 @@ interface VoiceContextValue {
 const VoiceContext = createContext<VoiceContextValue | null>(null);
 
 const DEFAULT_AGENTS: Agent[] = [
-  { id: "joy", name: "JOY" },
+  { id: "hermes", name: "HERMES" },
+  { id: "apex", name: "APEX" },
+  { id: "nova", name: "NOVA" },
+  { id: "atlas", name: "ATLAS" },
+  { id: "orion", name: "ORION" },
   { id: "sentinel", name: "SENTINEL" },
-  { id: "quant", name: "QUANT" },
-  { id: "scout", name: "SCOUT" },
-  { id: "fixer", name: "FIXER" },
+  { id: "cipher", name: "CIPHER" },
 ];
+
+/** Engine state → presentation phase. */
+const STATE_TO_PHASE: Record<VoiceState, VoicePhase> = {
+  idle: "idle",
+  requesting: "requesting",
+  listening: "listening",
+  error: "error",
+};
 
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
   // Per-agent log: each entry tagged with the agent it belongs to.
   const [routedLog, setRoutedLog] = useState<RoutedLogEntry[]>([
-    { agentId: null, line: "[J.A.R.V.I.S.] Ready for input..." },
+    { agentId: null, line: "[HERMES] Command network ready." },
   ]);
   const [agents, setAgents] = useState<Agent[]>(DEFAULT_AGENTS);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  // When set, overrides the engine-derived phase. The transcription pipeline
+  // will drive this in a later phase; nothing sets it today.
+  const [phaseOverride, setPhaseOverride] = useState<VoicePhase | null>(null);
+  // Mic level, throttled: the VAD loop emits at 10Hz but re-rendering the whole
+  // tree that often is wasteful, so only meaningful changes are committed.
+  const [level, setLevel] = useState(0);
+  const lastLevelRef = useRef(0);
 
-  const appendRoutedLog = (entry: RoutedLogEntry) => {
+  const appendRoutedLog = useCallback((entry: RoutedLogEntry) => {
     setRoutedLog((prev) => [...prev.slice(-49), entry]);
-  };
+  }, []);
 
-  const appendLog = (line: string) => {
-    // Treat bare appendLog as system-level (tagged null)
-    appendRoutedLog({ agentId: null, line });
-  };
+  const appendLog = useCallback(
+    (line: string) => {
+      // Treat bare appendLog as system-level (tagged null)
+      appendRoutedLog({ agentId: null, line });
+    },
+    [appendRoutedLog],
+  );
 
-  const handleVoiceEvent = (event: VoiceEvent) => {
-    if (event.kind === "listening") {
-      appendRoutedLog({ agentId: null, line: "[J.A.R.V.I.S.] Voice channel active." });
-    } else if (event.kind === "hearing") {
-      appendRoutedLog({ agentId: null, line: "[J.A.R.V.I.S.] Hearing you..." });
-    } else if (event.kind === "silent") {
-      appendRoutedLog({ agentId: null, line: "[J.A.R.V.I.S.] Awaiting input..." });
-    } else if (event.kind === "error") {
-      appendRoutedLog({ agentId: null, line: `[J.A.R.V.I.S.] ${event.message}` });
-    }
-  };
+  const handleVoiceEvent = useCallback(
+    (event: VoiceEvent) => {
+      if (event.kind === "listening") {
+        appendRoutedLog({ agentId: null, line: "[HERMES] Voice channel active." });
+      } else if (event.kind === "error") {
+        appendRoutedLog({ agentId: null, line: `[HERMES] ${event.message}` });
+        setLevel(0);
+      } else {
+        // `hearing` / `silent` fire every 100ms — they drive the waveform, not
+        // the log. Writing them to the feed would flood it.
+        const next = Math.min(1, event.level * 12);
+        if (Math.abs(next - lastLevelRef.current) > 0.04) {
+          lastLevelRef.current = next;
+          setLevel(next);
+        }
+      }
+    },
+    [appendRoutedLog],
+  );
 
   const voice = useVoice({ onEvent: handleVoiceEvent });
+
+  const engineStop = voice.stop;
+  const stopVoice = useCallback(() => {
+    engineStop();
+    lastLevelRef.current = 0;
+    setLevel(0);
+  }, [engineStop]);
+
+  const phase: VoicePhase = phaseOverride ?? STATE_TO_PHASE[voice.state];
+
+  const target: VoiceTarget = useMemo(() => {
+    const agent = activeAgentId
+      ? agents.find((a) => a.id === activeAgentId)
+      : undefined;
+    return { agentId: agent?.id ?? null, label: agent?.name ?? "ALL" };
+  }, [activeAgentId, agents]);
 
   return (
     <VoiceContext.Provider
       value={{
         state: voice.state,
+        phase,
+        level: voice.state === "listening" ? level : 0,
+        setPhase: setPhaseOverride,
         errorMessage: voice.errorMessage,
         start: voice.start,
-        stop: voice.stop,
+        stop: stopVoice,
         log: routedLog.map((e) => e.line),
         appendLog,
         activeAgentId,
+        setActiveAgentId,
+        target,
         agents,
         setAgents,
         routedLog,
@@ -100,46 +173,10 @@ export function useVoiceContext() {
   return ctx;
 }
 
-/**
- * parseAgentMention — extract the first @-mention from a message.
+/*
+ * Command parsing lives in `lib/chat/command-parser`.
  *
- * Rules (per Shoaib, Aug 25):
- * - Single @-prefix matches the FIRST agent whose id or name starts with the
- *   mention (case-insensitive). E.g. `@joy` → JOY, `@s` → SENTINEL.
- * - Returns null if no @-prefix is found (meaning "broadcast to all").
- *
- * If the mention doesn't match any agent, returns the literal `{ matched: null }`
- * so the caller can decide what to do (we choose: broadcast as fallback).
+ * It was moved out of this provider so one parser serves both typed input and
+ * (later) voice transcripts, and so it stays free of React and microphone
+ * concerns. Two competing mention parsers would have drifted.
  */
-export interface MentionResult {
-  /** Matched agent, or null if @-prefix didn't match. */
-  matched: Agent | null;
-  /** The cleaned message with the @-prefix removed. */
-  cleaned: string;
-  /** True if the input had an @-prefix at all (even if no match). */
-  hadMention: boolean;
-}
-
-export function parseAgentMention(
-  input: string,
-  agents: Agent[],
-): MentionResult {
-  const match = input.match(/@(\w+)/);
-  if (!match) {
-    return { matched: null, cleaned: input, hadMention: false };
-  }
-  const needle = match[1].toLowerCase();
-  // First agent whose id or name (lowercased) starts with needle
-  const found = agents.find(
-    (a) =>
-      a.id.toLowerCase().startsWith(needle) ||
-      a.name.toLowerCase().startsWith(needle),
-  );
-  // Strip the @-mention from the message
-  const cleaned = input.replace(/@\w+/, "").trim();
-  return {
-    matched: found ?? null,
-    cleaned,
-    hadMention: true,
-  };
-}

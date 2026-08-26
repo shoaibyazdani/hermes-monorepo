@@ -2,136 +2,579 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   HERMES DESIGN TOKENS
+   Layer 1 — primitives (raw values, never referenced by components directly)
+   Layer 2 — semantic tokens (what components consume)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  /* JARVIS design tokens (CSS variables, exposed for SVG fills/strokes) */
-  --bg-base: #050810;
-  --bg-panel: rgba(8, 14, 26, 0.55);
-  --cyan: #00D9FF;
-  --cyan-dim: rgba(0, 217, 255, 0.15);
-  --cyan-faint: rgba(0, 217, 255, 0.06);
-  --cyan-glow: rgba(0, 217, 255, 0.45);
-  --amber: #FF6B35;
-  --amber-glow: rgba(255, 107, 53, 0.4);
-  --red: #ff3b30;
-  --green: #10b981;
-  --text: #e0f4ff;
-  --text-mute: #94a3b8;
+  /* ── Layer 1: primitives ────────────────────────────────────────────── */
+  --c-void:        #03060d;
+  --c-abyss:       #050810;
+  --c-deep:        #070c18;
+  --c-surface:     #0a1120;
+  --c-surface-2:   #0e1729;
+
+  --c-cyan-500:    #00d9ff;
+  --c-cyan-600:    #00a8c8;
+  --c-blue-500:    #3b82f6;
+  --c-green-500:   #10b981;
+  --c-amber-500:   #f59e0b;
+  --c-orange-500:  #ff6b35;
+  --c-red-500:     #ff3b30;
+  --c-violet-500:  #8b5cf6;
+
+  --c-ink-100:     #e6f6ff;
+  --c-ink-300:     #a7c3d4;
+  --c-ink-500:     #6b8299;
+  --c-ink-700:     #3d4c5c;
+
+  /* ── Layer 2: semantic — surfaces ───────────────────────────────────── */
+  --bg-base:       var(--c-abyss);
+  --bg-deep:       var(--c-deep);
+  --bg-surface:    rgba(10, 17, 32, 0.72);
+  --bg-raised:     rgba(14, 23, 41, 0.85);
+  --bg-glass:      rgba(8, 14, 26, 0.45);
+  --bg-inset:      rgba(0, 0, 0, 0.32);
+  /* Legacy alias — kept so existing bg-bg-panel usages keep working. */
+  --bg-panel:      var(--bg-surface);
+
+  /* ── Layer 2: semantic — accent (primary HUD colour) ────────────────── */
+  --accent:        var(--c-cyan-500);
+  --accent-strong: #6ee7ff;
+  --accent-muted:  rgba(0, 217, 255, 0.55);
+  --accent-line:   rgba(0, 217, 255, 0.22);
+  --accent-line-soft: rgba(0, 217, 255, 0.10);
+  --accent-wash:   rgba(0, 217, 255, 0.06);
+  --accent-glow:   rgba(0, 217, 255, 0.40);
+
+  /* ── Layer 2: semantic — status ─────────────────────────────────────── */
+  --status-neutral:  var(--c-ink-500);
+  --status-info:     var(--c-cyan-500);
+  --status-active:   var(--c-green-500);
+  --status-warn:     var(--c-amber-500);
+  --status-critical: var(--c-red-500);
+  --status-offline:  var(--c-ink-700);
+
+  /* ── Layer 2: semantic — text ───────────────────────────────────────── */
+  --text:          var(--c-ink-100);
+  --text-mute:     var(--c-ink-300);
+  --text-faint:    var(--c-ink-500);
+  --text-ghost:    var(--c-ink-700);
+
+  /* ── Layer 2: semantic — borders ────────────────────────────────────── */
+  --border:        rgba(0, 217, 255, 0.16);
+  --border-soft:   rgba(0, 217, 255, 0.08);
+  --border-strong: rgba(0, 217, 255, 0.42);
+
+  /* ── Elevation ──────────────────────────────────────────────────────── */
+  --shadow-panel:  0 1px 0 rgba(255, 255, 255, 0.03) inset,
+                   0 18px 40px -24px rgba(0, 0, 0, 0.9);
+  --shadow-raised: 0 24px 60px -28px rgba(0, 0, 0, 0.95),
+                   0 0 0 1px rgba(0, 217, 255, 0.06);
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --ease-hud:      cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast:      140ms;
+  --dur-base:      260ms;
+  --dur-slow:      560ms;
+
+  /* ── Layout ─────────────────────────────────────────────────────────── */
+  --shell-nav-w:         216px;
+  --shell-nav-w-compact:  60px;
+  --shell-topbar-h:       52px;
+
+  /* ── Legacy aliases (Phase 2 components still reference these) ──────── */
+  --cyan:        var(--accent);
+  --cyan-dim:    var(--border);
+  --cyan-faint:  var(--accent-wash);
+  --cyan-glow:   var(--accent-glow);
+  --amber:       var(--c-orange-500);
+  --amber-glow:  rgba(255, 107, 53, 0.4);
+  --red:         var(--status-critical);
+  --green:       var(--status-active);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BASE
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 @layer base {
-  html, body {
-    height: 100%;
+  * {
+    border-color: var(--border-soft);
   }
+
+  html {
+    height: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
+    min-height: 100%;
     background-color: var(--bg-base);
     color: var(--text);
-    font-family: var(--font-data);
-    /* Animated particle mesh background — 2 layers */
-    background-image:
-      linear-gradient(rgba(0, 217, 255, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 217, 255, 0.06) 1px, transparent 1px);
-    background-size: 80px 80px, 80px 80px;
-    background-attachment: fixed;
-    position: relative;
-    display: flex;
-    flex-direction: column;
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-feature-settings: "tnum" 1;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
   }
-  body::after {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(0, 217, 255, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 217, 255, 0.06) 1px, transparent 1px);
-    background-size: 120px 120px, 120px 120px;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.5;
-    animation: meshDrift2 35s linear infinite reverse;
+
+  /* Focus ring — one definition, applied everywhere. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
   }
-  @keyframes meshDrift2 {
-    from { background-position: 0 0; }
-    to { background-position: 120px 120px; }
+
+  ::selection {
+    background: rgba(0, 217, 255, 0.28);
+    color: var(--text);
+  }
+
+  /* Thin HUD scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 217, 255, 0.3) transparent;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 217, 255, 0.18);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0, 217, 255, 0.34); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TYPOGRAPHY SCALE
+   Named levels so screens never invent one-off sizes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  .t-system-title {
+    font-family: var(--font-hud), system-ui, sans-serif;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .t-section-title {
+    font-family: var(--font-hud), system-ui, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    line-height: 1.2;
+  }
+  .t-panel-title {
+    font-family: var(--font-hud), system-ui, sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .t-agent-name {
+    font-family: var(--font-hud), system-ui, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1.1;
+  }
+  .t-metric {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .t-metric-sm {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .t-label {
+    font-family: var(--font-hud), system-ui, sans-serif;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    line-height: 1.3;
+  }
+  .t-meta {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    line-height: 1.5;
+  }
+  .t-timestamp {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.08em;
+    color: var(--text-ghost);
+    line-height: 1.4;
+  }
+  .t-command {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.8125rem;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .t-chat {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: var(--text-mute);
   }
 }
 
-/* TL + BR corner brackets (the spans cover TR + BL) */
-.panel::before,
-.panel::after {
-  content: '';
+/* ═══════════════════════════════════════════════════════════════════════════
+   HUD PRIMITIVES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* Clipped corners — three sizes. */
+  .clip-hud-sm {
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  }
+  .clip-hud {
+    clip-path: polygon(
+      12px 0, calc(100% - 12px) 0, 100% 12px,
+      100% calc(100% - 12px), calc(100% - 12px) 100%,
+      12px 100%, 0 calc(100% - 12px), 0 12px
+    );
+  }
+  .clip-hud-lg {
+    clip-path: polygon(
+      18px 0, calc(100% - 18px) 0, 100% 18px,
+      100% calc(100% - 18px), calc(100% - 18px) 100%,
+      18px 100%, 0 calc(100% - 18px), 0 18px
+    );
+  }
+
+  /* Legacy alias used by VoiceInputBar dropdown. */
+  .ar-corners {
+    clip-path: polygon(
+      14px 0, calc(100% - 14px) 0, 100% 14px,
+      100% calc(100% - 14px), calc(100% - 14px) 100%,
+      14px 100%, 0 calc(100% - 14px), 0 14px
+    );
+  }
+
+  /* Horizontal data line — a hairline rule with a bright leading segment. */
+  .hud-rule {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      var(--accent-muted) 0%,
+      var(--accent-line) 12%,
+      var(--border-soft) 40%,
+      transparent 100%
+    );
+  }
+
+  /* Technical grid backdrop for panel interiors. */
+  .hud-grid {
+    background-image:
+      linear-gradient(var(--accent-line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--accent-line-soft) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Inset well for logs / terminal output. */
+  .hud-well {
+    background: var(--bg-inset);
+    border-left: 2px solid var(--accent-line);
+    box-shadow: inset 0 0 24px rgba(0, 217, 255, 0.04);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BACKGROUND TREATMENT
+   Layered: radial lighting -> technical grid -> vignette. Owned by HudBackdrop.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.hud-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hud-backdrop__glow {
   position: absolute;
-  width: 22px; height: 22px;
+  inset: -20%;
+  background:
+    radial-gradient(60% 45% at 50% 0%, rgba(0, 140, 200, 0.16) 0%, transparent 65%),
+    radial-gradient(45% 40% at 12% 82%, rgba(0, 110, 170, 0.10) 0%, transparent 70%),
+    radial-gradient(50% 45% at 88% 78%, rgba(70, 60, 180, 0.08) 0%, transparent 72%);
+}
+
+.hud-backdrop__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 217, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 217, 255, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, #000 0%, rgba(0, 0, 0, 0.35) 68%, transparent 100%);
+  mask-image: radial-gradient(circle at 50% 40%, #000 0%, rgba(0, 0, 0, 0.35) 68%, transparent 100%);
+}
+
+.hud-backdrop__grid--fine {
+  background-size: 16px 16px;
+  opacity: 0.4;
+  animation: gridDrift 48s linear infinite;
+}
+
+@keyframes gridDrift {
+  from { background-position: 0 0; }
+  to   { background-position: 16px 16px; }
+}
+
+/* Faint film grain, drawn as a repeating dot matrix (no external asset). */
+.hud-backdrop__noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 0.5px, transparent 0.5px);
+  background-size: 3px 3px;
+  mix-blend-mode: overlay;
+}
+
+.hud-backdrop__vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* Drifting horizontal sweep — one slow band, never more. */
+.hud-backdrop__sweep {
+  position: absolute;
+  inset-inline: 0;
+  height: 34vh;
+  top: -34vh;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0, 217, 255, 0.022) 45%,
+    rgba(0, 217, 255, 0.055) 50%,
+    rgba(0, 217, 255, 0.022) 55%,
+    transparent 100%
+  );
+  animation: backdropSweep 14s linear infinite;
+}
+
+@keyframes backdropSweep {
+  from { transform: translateY(0); }
+  to   { transform: translateY(140vh); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATION LANGUAGE
+   Every animation below communicates system activity.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes hudPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.42; transform: scale(0.82); }
+}
+
+@keyframes hudBlink {
+  0%, 45%  { opacity: 1; }
+  50%, 95% { opacity: 0.25; }
+  100%     { opacity: 1; }
+}
+
+@keyframes hudReveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes hudScanning {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes hudRipple {
+  0%   { transform: scale(0.7); opacity: 0.55; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+@keyframes hudWave {
+  0%, 100% { transform: scaleY(0.28); }
+  50%      { transform: scaleY(1); }
+}
+
+/* Legacy keyframes kept for Phase 2 components. */
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes titlePulse {
+  0%, 100% { opacity: 1; transform: translateX(0); }
+  50% { opacity: 0.5; transform: translateX(2px); }
+}
+@keyframes pulse-out {
+  0%   { r: 50; opacity: 0.8; }
+  100% { r: 320; opacity: 0; }
+}
+@keyframes haloPulse {
+  0%, 100% { r: 6; opacity: 0.6; }
+  50% { r: 14; opacity: 0; }
+}
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ── Reduced motion: stop movement, keep state legible ─────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Purely decorative motion layers are removed rather than frozen. */
+  .hud-backdrop__sweep,
+  .hud-backdrop__grid--fine,
+  .hud-scanline,
+  .hud-scanning::after {
+    display: none !important;
+  }
+
+  /* Live dots must still read as live without pulsing — keep the halo lit. */
+  .hud-dot--live::after {
+    animation: none !important;
+    opacity: 0.35 !important;
+    transform: scale(1.6) !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPONENT-SPECIFIC STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Global CRT scan line (rendered once by the shell). */
+.hud-scanline {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  height: 56px;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0, 217, 255, 0.03) 40%,
+    rgba(0, 217, 255, 0.11) 50%,
+    rgba(0, 217, 255, 0.03) 60%,
+    transparent 100%
+  );
+  animation: backdropSweep 11s linear infinite;
+}
+
+/* Status dot with an optional live ripple halo. */
+.hud-dot {
+  position: relative;
+  display: inline-block;
+  border-radius: 9999px;
+  background: currentColor;
+  flex: none;
+}
+.hud-dot--live::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 1px solid currentColor;
+  animation: hudRipple 1.9s ease-out infinite;
+}
+
+/* Voice waveform bars. */
+.hud-wave-bar {
+  transform-origin: center;
+  animation: hudWave 900ms ease-in-out infinite;
+}
+
+/* Panel entrance — staggered by inline --reveal-delay. */
+.hud-reveal {
+  animation: hudReveal var(--dur-slow) var(--ease-hud) both;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+/* Scanning sheen used by active panels and loading states. */
+.hud-scanning::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgba(0, 217, 255, 0.07) 50%,
+    transparent 60%
+  );
+  animation: hudScanning 2.8s ease-in-out infinite;
+}
+
+/* ── Legacy: agent radar (still used by /command-center) ───────────────── */
+/* Decorative geometry must never intercept clicks aimed at an agent dot. */
+.radar-svg .ring,
+.radar-svg .tick,
+.radar-svg .cross,
+.radar-svg .sweep,
+.radar-svg .pulse-circle,
+.radar-svg .corner-bracket,
+.radar-svg .label,
+.radar-svg .agent-halo {
   pointer-events: none;
 }
-.panel::before {
-  top: 6px; left: 6px;
-  border-top: 2px solid var(--cyan);
-  border-left: 2px solid var(--cyan);
-  box-shadow: 0 0 6px var(--cyan-glow);
-}
-.panel::after {
-  bottom: 6px; right: 6px;
-  border-bottom: 2px solid var(--cyan);
-  border-right: 2px solid var(--cyan);
-  box-shadow: 0 0 6px var(--cyan-glow);
-}
-
-/* === Agent radar (Phase 2) === */
-.radar-svg .ring {
-  fill: none;
-  stroke: rgba(0, 212, 255, 0.25);
-  stroke-width: 1;
-}
-.radar-svg .ring.major {
-  stroke: rgba(0, 212, 255, 0.5);
-  stroke-width: 1.5;
-}
-.radar-svg .tick {
-  stroke: rgba(0, 212, 255, 0.6);
-  stroke-width: 1;
-}
-.radar-svg .tick.major {
-  stroke: rgba(0, 212, 255, 0.9);
-  stroke-width: 2;
-}
-.radar-svg .cross {
-  stroke: rgba(0, 212, 255, 0.3);
-  stroke-width: 1;
-  stroke-dasharray: 2 4;
-}
+.radar-svg .ring { fill: none; stroke: rgba(0, 212, 255, 0.2); stroke-width: 1; }
+.radar-svg .ring.major { stroke: rgba(0, 212, 255, 0.42); stroke-width: 1.4; }
+.radar-svg .tick { stroke: rgba(0, 212, 255, 0.55); stroke-width: 1; }
+.radar-svg .tick.major { stroke: rgba(0, 212, 255, 0.85); stroke-width: 2; }
+.radar-svg .cross { stroke: rgba(0, 212, 255, 0.24); stroke-width: 1; stroke-dasharray: 2 4; }
 .radar-svg .sweep {
   fill: url(#sweep-gradient);
-  opacity: 0.45;
+  opacity: 0.4;
   transform-origin: center;
   animation: spin 5s linear infinite;
 }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .radar-svg .pulse-circle {
   fill: none;
-  stroke: var(--cyan);
+  stroke: var(--accent);
   stroke-width: 1.5;
   opacity: 0;
   transform-origin: center;
   animation: pulse-out 3s linear infinite;
-  filter: drop-shadow(0 0 4px var(--cyan));
+  filter: drop-shadow(0 0 4px var(--accent));
 }
-@keyframes pulse-out {
-  0% { r: 50; opacity: 0.8; }
-  100% { r: 320; opacity: 0; }
-}
-.radar-svg.activity .pulse-circle {
-  animation: pulse-out 1.2s linear infinite;
-}
+.radar-svg.activity .pulse-circle { animation: pulse-out 1.2s linear infinite; }
 .radar-svg .corner-bracket {
-  stroke: var(--cyan);
+  stroke: var(--accent);
   stroke-width: 2;
   fill: none;
-  opacity: 0.7;
-  filter: drop-shadow(0 0 4px var(--cyan-glow));
+  opacity: 0.6;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
 }
 .radar-svg .label {
-  fill: rgba(0, 212, 255, 0.8);
+  fill: rgba(0, 212, 255, 0.75);
   font-family: var(--font-hud);
   font-size: 11px;
   letter-spacing: 0.2em;
@@ -146,170 +589,150 @@
   opacity: 0;
   animation: haloPulse 1.8s ease-in-out infinite;
 }
-@keyframes haloPulse {
-  0%, 100% { r: 6; opacity: 0.6; }
-  50% { r: 14; opacity: 0; }
-}
 
-/* Modal backdrop (used by ChatModal) */
+/* ── Legacy: chat modal ─────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.82);
+  -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   display: none; align-items: center; justify-content: center;
   z-index: 1000;
 }
 .modal-backdrop.open { display: flex; }
 .modal {
-  background: var(--bg-panel);
-  border: 1px solid var(--cyan-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
   clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px);
-  width: 90%; max-width: 520px; height: 70vh; max-height: 600px;
+  width: 90%; max-width: 560px; height: 70vh; max-height: 620px;
   display: flex; flex-direction: column;
-  backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 212, 255, 0.2);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: var(--shadow-raised);
 }
 .modal-header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--cyan-dim);
+  border-bottom: 1px solid var(--border);
   display: flex; justify-content: space-between; align-items: center;
 }
 .modal-header h3 {
   margin: 0;
   font-family: var(--font-hud);
-  color: var(--cyan);
-  font-size: 18px;
+  color: var(--accent);
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
 }
 .modal-header-actions { display: flex; align-items: center; gap: 10px; }
 .modal-mic-btn {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 14px;
-  background: rgba(0, 212, 255, 0.1);
-  border: 1px solid var(--cyan-dim);
-  color: var(--cyan);
-  border-radius: 6px;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid var(--border);
+  color: var(--accent);
   font-family: var(--font-hud);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--dur-fast) var(--ease-hud);
 }
 .modal-mic-btn:hover {
-  background: rgba(0, 212, 255, 0.2);
-  border-color: var(--cyan);
-  box-shadow: 0 0 14px var(--cyan-glow);
-  transform: translateY(-1px);
+  background: rgba(0, 212, 255, 0.16);
+  border-color: var(--border-strong);
 }
 .modal-mic-btn.active {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: var(--green);
-  color: var(--green);
-  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.16);
+  border-color: var(--status-active);
+  color: var(--status-active);
   animation: badgePulse 2s ease-in-out infinite;
 }
-.modal-mic-btn svg { width: 16px; height: 16px; }
+.modal-mic-btn svg { width: 15px; height: 15px; }
 .modal-header .close {
   background: none; border: none;
-  color: var(--text-mute); font-size: 24px;
-  cursor: pointer; transition: color 0.2s;
+  color: var(--text-faint); font-size: 22px;
+  cursor: pointer; transition: color var(--dur-fast);
+  line-height: 1;
 }
-.modal-header .close:hover { color: var(--red); }
+.modal-header .close:hover { color: var(--status-critical); }
 .modal-messages { flex: 1; overflow-y: auto; padding: 16px; }
 .modal-input {
   padding: 14px;
-  border-top: 1px solid var(--cyan-dim);
+  border-top: 1px solid var(--border);
   display: flex; gap: 8px;
 }
 .modal-input input {
   flex: 1; padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--cyan-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 6px;
   font-family: var(--font-data);
+  font-size: 13px;
 }
 .modal-input input:focus {
   outline: none;
-  border-color: var(--cyan);
-  box-shadow: 0 0 12px var(--cyan-glow);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-line);
 }
 .modal-input button {
   padding: 10px 18px;
-  background: linear-gradient(135deg, var(--cyan), #6366f1);
-  color: white;
-  border: none;
-  border-radius: 6px;
+  background: rgba(0, 217, 255, 0.14);
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
   font-family: var(--font-hud);
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   cursor: pointer;
+  transition: background var(--dur-fast);
 }
-.modal-input button:hover {
-  box-shadow: 0 0 12px var(--cyan-glow);
-}
+.modal-input button:hover { background: rgba(0, 217, 255, 0.24); }
 .message {
   margin-bottom: 12px;
-  padding: 12px 16px;
-  border-radius: 6px;
+  padding: 10px 14px;
   max-width: 85%;
-  font-size: 14px;
-  line-height: 1.5;
-  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: var(--font-data);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 .message.user {
-  background: linear-gradient(135deg, var(--cyan), #6366f1);
-  color: white;
+  background: rgba(0, 217, 255, 0.16);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
   margin-left: auto;
-  box-shadow: 0 0 16px var(--cyan-glow);
 }
 .message.agent {
-  background: rgba(0, 212, 255, 0.08);
-  border: 1px solid var(--cyan-dim);
-  color: var(--text);
+  background: rgba(0, 212, 255, 0.05);
+  border: 1px solid var(--border-soft);
+  color: var(--text-mute);
 }
 
-/* === Phase 2 page utilities (lifted from legacy command-center.html) === */
+/* ── Legacy: panel title used by /command-center + /apex ───────────────── */
 .panel-title {
   font-family: var(--font-hud);
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--cyan);
+  color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 0.25em;
+  letter-spacing: 0.24em;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--cyan-dim);
+  border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
 }
 .panel-title::before {
   content: '▸';
-  color: var(--cyan);
+  color: var(--accent);
   animation: titlePulse 1.6s ease-in-out infinite;
-}
-@keyframes titlePulse {
-  0%, 100% { opacity: 1; transform: translateX(0); }
-  50% { opacity: 0.5; transform: translateX(2px); }
 }
 .brand-mark {
   width: 28px; height: 28px;
-  background: conic-gradient(from 0deg, var(--cyan), var(--amber), var(--cyan));
+  background: conic-gradient(from 0deg, var(--accent), var(--c-orange-500), var(--accent));
   border-radius: 50%;
   animation: spin 4s linear infinite;
-  box-shadow:
-    0 0 16px var(--cyan-glow),
-    inset 0 0 8px rgba(0, 0, 0, 0.3);
-}
-.ar-corners {
-  clip-path: polygon(
-    14px 0, calc(100% - 14px) 0, 100% 14px,
-    100% calc(100% - 14px), calc(100% - 14px) 100%,
-    14px 100%, 0 calc(100% - 14px), 0 14px
-  );
+  box-shadow: 0 0 16px var(--accent-glow), inset 0 0 8px rgba(0, 0, 0, 0.3);
 }
 .bg-radial-radial {
-  background: radial-gradient(circle at center, rgba(0, 80, 140, 0.25) 0%, transparent 70%);
+  background: radial-gradient(circle at center, rgba(0, 80, 140, 0.18) 0%, transparent 70%);
 }

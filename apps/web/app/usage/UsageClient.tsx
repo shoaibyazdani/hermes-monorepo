@@ -2,10 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { Panel } from "@/components/hud/Panel";
-import { StatusLine } from "@/components/hud/StatusLine";
-import { JarvisHeader } from "@/components/hud/JarvisHeader";
-import { VoiceInputBar } from "@/components/voice/VoiceInputBar";
-import { useClock } from "@/hooks/useClock";
+import { Meter } from "@/components/hud/Meter";
+import { DataRow } from "@/components/hud/DataRow";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { AgentActivity } from "@/components/agents/AgentActivity";
+import { useAgents, useAgentNameLookup } from "@/hooks/useAgents";
+import { formatCount } from "@/lib/format";
+import { getMockActivity } from "@/lib/mock/activity";
+
+const ACTIVITY = getMockActivity();
+const REFRESH_MS = 30_000;
 
 interface AgentUsage {
   agent: string;
@@ -25,13 +31,21 @@ interface UsageData {
   bySkill: SkillUsage[];
 }
 
+/**
+ * Usage — call volume, token spend and skill activity.
+ *
+ * Reads the existing `/api/usage` placeholder route unchanged.
+ */
 export default function UsageClient() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { utc } = useClock();
+  const [loading, setLoading] = useState(true);
+  const { agents } = useAgents();
+  const agentName = useAgentNameLookup(agents);
 
   useEffect(() => {
     let cancelled = false;
+
     async function fetchData() {
       try {
         const res = await fetch("/api/usage");
@@ -41,199 +55,187 @@ export default function UsageClient() {
           setUsage(data.usage ?? null);
           setError(null);
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "fetch failed");
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "fetch failed");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
-    fetchData();
-    const id = setInterval(fetchData, 30_000);
+
+    void fetchData();
+    const id = setInterval(() => void fetchData(), REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, []);
 
-  const totalTokens =
-    usage?.byAgent.reduce((acc, a) => acc + a.tokens, 0) ?? 0;
-
+  const totalTokens = usage?.byAgent.reduce((acc, a) => acc + a.tokens, 0) ?? 0;
+  const maxCalls = Math.max(...(usage?.byAgent.map((a) => a.calls) ?? [1]), 1);
   const maxMentions = Math.max(
     ...(usage?.bySkill.map((s) => s.mentions) ?? [1]),
-    1
+    1,
   );
 
   return (
-    <main className="min-h-screen flex flex-col">
-      {/* JARVIS header (dramatic, like landing page) */}
-      <JarvisHeader
-        tagline="// USAGE STATS // Agent calls, skill mentions, recent activity //"
-        current="logs"
+    <div className="flex min-h-full flex-col">
+      <PageHeader
+        title="Usage"
+        subtitle="Call volume · token spend · skill activity"
+        meta={[
+          { label: "REFRESH", value: `${REFRESH_MS / 1000}s` },
+          { label: "STATUS", value: error ? "STALE" : loading ? "SYNCING" : "LIVE" },
+        ]}
       />
 
-      {/* Title */}
-      <div className="px-6 pt-6 pb-4">
-        <h1
-          className="text-3xl md:text-4xl font-bold tracking-tight"
-          style={{
-            background: "linear-gradient(135deg, #00D9FF 0%, #8b5cf6 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}
-        >
-          Usage Stats
-        </h1>
-        <div className="mt-1 text-sm text-ink-mute">
-          Agent calls, skill mentions, recent activity — auto-refresh every 30s
+      <div className="flex flex-1 flex-col gap-3 p-3 sm:p-4">
+        {/* Stat row */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile
+            label="Total Calls"
+            value={usage ? formatCount(usage.total) : "—"}
+            sub="aggregate"
+            stagger={0}
+          />
+          <StatTile
+            label="Total Tokens"
+            value={totalTokens ? formatCount(totalTokens) : "—"}
+            sub="across agents"
+            stagger={1}
+          />
+          <StatTile
+            label="Agents"
+            value={usage ? `${usage.byAgent.length}` : "—"}
+            sub="reporting"
+            stagger={2}
+          />
+          <StatTile
+            label="Skills"
+            value={usage ? `${usage.bySkill.length}` : "—"}
+            sub="tracked"
+            stagger={3}
+          />
         </div>
-      </div>
 
-      {/* Stat cards row */}
-      <div className="px-6 pb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard
-          label="Total Calls"
-          value={usage ? usage.total.toLocaleString() : "—"}
-          sub="aggregate"
-        />
-        <StatCard
-          label="Total Tokens"
-          value={totalTokens ? totalTokens.toLocaleString() : "—"}
-          sub="across agents"
-        />
-        <StatCard
-          label="Agents"
-          value={usage ? `${usage.byAgent.length}` : "—"}
-          sub="active"
-        />
-        <StatCard
-          label="Skills"
-          value={usage ? `${usage.bySkill.length}` : "—"}
-          sub="tracked"
-        />
-      </div>
+        <div className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
+          {/* Calls by agent */}
+          <Panel
+            title="Calls by Agent"
+            eyebrow={usage ? `${usage.byAgent.length}` : "—"}
+            status={error ? "warn" : "info"}
+            stagger={4}
+          >
+            {error && (
+              <p className="t-meta mb-3 text-hud-amber">
+                Failed to load: {error}
+              </p>
+            )}
+            {loading && !usage && (
+              <p className="t-meta py-6">Loading usage data…</p>
+            )}
+            {usage && usage.byAgent.length === 0 && (
+              <p className="t-meta py-6">No agent calls recorded.</p>
+            )}
+            {usage && usage.byAgent.length > 0 && (
+              <ul className="space-y-3">
+                {usage.byAgent.map((a) => (
+                  <li key={a.agent}>
+                    <div className="flex items-baseline gap-3">
+                      <span className="t-label min-w-0 flex-1 truncate">
+                        {a.agent}
+                      </span>
+                      <span className="flex-none font-data text-xs font-bold tabular-nums text-hud-cyan">
+                        {formatCount(a.calls)}
+                      </span>
+                      <span className="t-timestamp flex-none">
+                        {formatCount(a.tokens)} tok
+                      </span>
+                    </div>
+                    <Meter
+                      value={a.calls}
+                      max={maxCalls}
+                      className="mt-1.5"
+                      label={`${a.agent} calls`}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
 
-      {/* Main 2-col grid */}
-      <div className="flex-1 px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* By Agent */}
-        <Panel stagger={1} className="min-h-[200px]">
-          <div className="panel-title">Calls by Agent</div>
-          {error && (
-            <div className="text-xs text-hud-red mb-2">
-              Failed to load: {error}
-            </div>
-          )}
-          {!usage && !error && (
-            <div className="text-xs text-ink-mute">Loading…</div>
-          )}
-          {usage?.byAgent.map((a) => (
-            <div
-              key={a.agent}
-              className="flex items-center justify-between py-2 border-b border-hudcss-cyan-faint last:border-b-0 font-data text-sm"
-            >
-              <span className="font-hud uppercase tracking-[0.1em] text-ink">
-                {a.agent}
-              </span>
-              <span className="tabular-nums text-hud-cyan font-bold">
-                {a.calls.toLocaleString()} <span className="text-xs text-ink-mute font-normal">calls</span>
-              </span>
-              <span className="text-xs text-ink-mute tabular-nums">
-                {a.tokens.toLocaleString()} tok
-              </span>
-            </div>
-          ))}
-        </Panel>
-
-        {/* Skill Mentions (bar chart, inline SVG-ish via Tailwind) */}
-        <Panel stagger={2} className="min-h-[200px]">
-          <div className="panel-title">Skill Mentions</div>
-          {usage?.bySkill.length === 0 && (
-            <div className="text-xs text-ink-mute">No skill activity yet.</div>
-          )}
-          {usage?.bySkill.map((s) => {
-            const pct = (s.mentions / maxMentions) * 100;
-            return (
+          {/* Skill mentions */}
+          <Panel
+            title="Skill Mentions"
+            eyebrow={usage ? `${usage.bySkill.length}` : "—"}
+            status="info"
+            stagger={5}
+          >
+            {loading && !usage && (
+              <p className="t-meta py-6">Loading skill data…</p>
+            )}
+            {usage && usage.bySkill.length === 0 && (
+              <p className="t-meta py-6">No skill activity yet.</p>
+            )}
+            {usage?.bySkill.map((s) => (
               <div key={s.skill} className="mb-3 last:mb-0">
-                <div className="flex justify-between font-data text-xs">
-                  <span className="font-hud uppercase tracking-[0.05em]">
+                <div className="flex items-baseline gap-3">
+                  <span className="t-label min-w-0 flex-1 truncate">
                     {s.skill}
                   </span>
-                  <span className="text-ink-mute">{s.mentions}×</span>
+                  <span className="flex-none font-data text-xs font-bold tabular-nums text-hud-cyan">
+                    {s.mentions}&times;
+                  </span>
+                  <span className="t-timestamp flex-none">{s.lastUsed}</span>
                 </div>
-                <div className="mt-1 h-1 bg-black/30 rounded overflow-hidden">
-                  <div
-                    className="h-1 bg-hud-cyan rounded"
-                    style={{
-                      width: `${pct}%`,
-                      boxShadow: "0 0 6px var(--cyan-glow)",
-                    }}
-                  />
-                </div>
+                <Meter
+                  value={s.mentions}
+                  max={maxMentions}
+                  className="mt-1.5"
+                  label={`${s.skill} mentions`}
+                />
               </div>
-            );
-          })}
-        </Panel>
+            ))}
+          </Panel>
 
-        {/* Recent activity placeholder */}
-        <Panel stagger={3} className="lg:col-span-2 min-h-[120px]">
-          <div className="panel-title">Recent Activity</div>
-          <div className="font-data text-xs text-ink-mute space-y-1">
-            <p>
-              Activity feed — Phase 2 placeholder. Phase 3 will hook this to a
-              real <code>/api/logs</code> endpoint streaming the last 50 log
-              lines.
-            </p>
-            <p>
-              While you wait, watch the right column on{" "}
-              <a href="/command-center" className="text-hud-cyan hover:underline">
-                /command-center
-              </a>{" "}
-              for live coms output.
-            </p>
-          </div>
-        </Panel>
+          {/* Activity */}
+          <Panel
+            title="Recent Activity"
+            eyebrow="EVENT LOG"
+            status="info"
+            stagger={6}
+            className="lg:col-span-2"
+            footer={
+              <p className="t-timestamp">
+                Mock event stream — a live `/api/logs` feed lands in a later phase.
+              </p>
+            }
+          >
+            <AgentActivity events={ACTIVITY} agentName={agentName} limit={8} />
+          </Panel>
+        </div>
       </div>
-
-      {/* Footer */}
-      <div className="flex-none max-w-[1400px] w-full mx-auto px-6 pb-6 animate-glitch">
-        <VoiceInputBar />
-        <StatusLine
-          items={[
-            { label: "", value: "ONLINE", pulse: true },
-            { label: "REFRESH", value: "30s" },
-            { label: "TOTAL", value: usage ? `${usage.total}` : "—" },
-            { label: "TIME", value: utc },
-          ]}
-        />
-      </div>
-    </main>
+    </div>
   );
 }
 
-function StatCard({
+function StatTile({
   label,
   value,
   sub,
+  stagger,
 }: {
   label: string;
   value: string;
   sub?: string;
+  stagger?: number;
 }) {
   return (
-    <div className="bg-gradient-to-br from-[rgba(20,24,58,0.6)] to-[rgba(15,18,38,0.6)] border border-hudcss-cyan-dim rounded-lg p-4 relative overflow-hidden">
-      <div
-        className="absolute top-0 left-0 right-0 h-[2px]"
-        style={{
-          background: "linear-gradient(90deg, #00D9FF, #8b5cf6)",
-        }}
-      />
-      <div className="text-[11px] text-ink-mute uppercase tracking-[0.15em]">
-        {label}
-      </div>
-      <div
-        className="text-3xl font-bold text-hud-cyan tabular-nums mt-1"
-        style={{ textShadow: "0 0 8px var(--cyan-glow)" }}
-      >
-        {value}
-      </div>
-      {sub && <div className="text-[11px] text-ink-mute/70 mt-1">{sub}</div>}
-    </div>
+    <Panel padding="md" stagger={stagger}>
+      <div className="t-label">{label}</div>
+      <div className="t-metric mt-2 text-hud-cyan">{value}</div>
+      {sub && <div className="t-timestamp mt-1.5">{sub}</div>}
+    </Panel>
   );
 }

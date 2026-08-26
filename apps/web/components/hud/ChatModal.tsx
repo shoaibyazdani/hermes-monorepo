@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Mic, Square, X } from "lucide-react";
 import { useVoiceContext } from "../voice/VoiceProvider";
 
 interface ChatModalProps {
@@ -10,74 +11,134 @@ interface ChatModalProps {
   onClose: () => void;
 }
 
-export function ChatModal({ open, agentId, agentName, onClose }: ChatModalProps) {
-  const { start, stop, state, errorMessage, appendLog, log } = useVoiceContext();
+/**
+ * ChatModal — a focused command channel with a single agent.
+ *
+ * Shows only that agent's routed log plus system-level lines, so opening a
+ * second agent does not mix their histories. Persistent conversations land in
+ * a later phase; this is the transitional surface.
+ */
+export function ChatModal({
+  open,
+  agentId,
+  agentName,
+  onClose,
+}: ChatModalProps) {
+  const { start, stop, state, errorMessage, appendLog, appendRoutedLog, routedLog } =
+    useVoiceContext();
   const [text, setText] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listening = state === "listening";
+
+  // Close on Escape and focus the input on open.
+  useEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
-  const handleExecute = async () => {
+  // This agent's traffic plus system-level lines.
+  const messages = routedLog.filter(
+    (e) => e.agentId === agentId || e.agentId === null,
+  );
+
+  const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    appendLog(`[YOU> ${agentName.toUpperCase()}] ${trimmed}`);
+    appendRoutedLog({ agentId, line: `[YOU → ${agentName}] ${trimmed}` });
+    appendLog(`[HERMES] Queued for ${agentName}.`);
     setText("");
-    if (state !== "listening") {
-      const ok = await start();
-      if (ok) appendLog(`[J.A.R.V.I.S.] Voice channel active.`);
-    }
   };
 
   return (
-    <div className="modal-backdrop open" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal-backdrop open"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="chat-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3 id="chatModalTitle">HERMES · {agentName.toUpperCase()}</h3>
+          <h3 id="chat-modal-title">HERMES · {agentName.toUpperCase()}</h3>
           <div className="modal-header-actions">
             <button
-              className={`modal-mic-btn ${state === "listening" ? "active" : ""}`}
-              onClick={() => (state === "listening" ? stop() : void start())}
-              title="Start voice with this agent"
-              aria-label="Start voice chat"
+              type="button"
+              className={`modal-mic-btn ${listening ? "active" : ""}`}
+              onClick={() => (listening ? stop() : void start())}
+              aria-pressed={listening}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-              <span>{state === "listening" ? "Listening" : "Talk"}</span>
+              {listening ? (
+                <Square size={12} strokeWidth={2} aria-hidden />
+              ) : (
+                <Mic size={14} strokeWidth={1.8} aria-hidden />
+              )}
+              <span>{listening ? "Stop" : "Talk"}</span>
             </button>
-            <button className="close" onClick={onClose} aria-label="Close">
-              ×
+            <button
+              type="button"
+              className="close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <X size={18} strokeWidth={1.8} aria-hidden />
             </button>
           </div>
         </div>
-        <div className="modal-messages" id="chatMessages">
+
+        <div className="modal-messages">
           <div className="message agent">
-            Standing by. Use voice or type. The mission is yours.
+            Standing by. Use voice or type — the mission is yours.
           </div>
-          {log.slice(-10).map((line, i) => (
-            <div key={i} className="message agent">
-              {line}
+          {messages.map((entry, i) => (
+            <div
+              key={`${entry.agentId ?? "sys"}-${i}`}
+              className={
+                entry.line.startsWith("[YOU") ? "message user" : "message agent"
+              }
+            >
+              {entry.line}
             </div>
           ))}
           {errorMessage && (
-            <div className="message agent" style={{ color: "var(--red)" }}>
-              ⚠ {errorMessage}
+            <div className="message agent" style={{ color: "var(--status-critical)" }}>
+              {errorMessage}
             </div>
           )}
         </div>
+
         <div className="modal-input">
+          <label htmlFor="chat-modal-input" className="sr-only">
+            Message {agentName}
+          </label>
           <input
+            id="chat-modal-input"
+            ref={inputRef}
             type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void handleExecute();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSend();
+              }
             }}
-            placeholder={`Send command to ${agentName}...`}
+            placeholder={`Send command to ${agentName}…`}
+            autoComplete="off"
           />
-          <button onClick={() => void handleExecute()}>→</button>
+          <button type="button" onClick={handleSend} disabled={!text.trim()}>
+            SEND
+          </button>
         </div>
       </div>
     </div>
