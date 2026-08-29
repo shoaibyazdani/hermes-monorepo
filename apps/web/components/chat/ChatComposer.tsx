@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CornerDownLeft, Mic, Square, StopCircle } from "lucide-react";
+import { CornerDownLeft, Mic, Square, StopCircle, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/hud/StatusDot";
 import { useVoiceContext } from "@/components/voice/VoiceProvider";
@@ -40,7 +40,13 @@ export function ChatComposer({
   className,
 }: ChatComposerProps) {
   const { state, level, start, stop } = useVoiceContext();
-  const { runtimeStatus } = useConversations();
+  const {
+    runtimeStatus,
+    speakerEnabled,
+    toggleSpeaker,
+    speakerNowPlayingId,
+    speakerQueueLength,
+  } = useConversations();
   const liveRuntime = runtimeStatus.live;
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -83,6 +89,47 @@ export function ChatComposer({
               ? "Channel active"
               : "Channel ready"}
         </span>
+        {/* Live-talk speaker toggle — enables TTS playback of the agent's
+            streamed response. Hidden when the runtime is in simulation mode
+            (no real model = no real response to speak). */}
+        {liveRuntime && (
+          <button
+            type="button"
+            onClick={toggleSpeaker}
+            aria-pressed={speakerEnabled}
+            aria-label={speakerEnabled ? "Mute agent voice" : "Speak agent voice aloud"}
+            title={
+              speakerEnabled
+                ? `Speaker on (${speakerQueueLength} queued)`
+                : "Speaker off — click to hear agent replies"
+            }
+            data-testid="speaker-toggle"
+            className={cn(
+              "ml-auto flex items-center gap-1.5 border px-2 py-0.5 font-hud text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors clip-hud-sm",
+              speakerEnabled
+                ? "border-hud-cyan/60 bg-hud-cyan/10 text-hud-cyan hover:bg-hud-cyan/20"
+                : "border-line text-ink-ghost hover:border-hud-cyan/40 hover:text-hud-cyan",
+            )}
+          >
+            {speakerEnabled ? (
+              <Volume2 size={12} strokeWidth={1.8} aria-hidden />
+            ) : (
+              <VolumeX size={12} strokeWidth={1.8} aria-hidden />
+            )}
+            <span>{speakerEnabled ? "Speak" : "Muted"}</span>
+            {speakerEnabled && speakerQueueLength > 0 && (
+              <span className="ml-1 text-hud-cyan/70">
+                ·{speakerQueueLength}
+              </span>
+            )}
+            {speakerEnabled && speakerNowPlayingId && (
+              <span
+                className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-hud-cyan"
+                aria-hidden
+              />
+            )}
+          </button>
+        )}
         {listening && (
           <VoiceWaveform
             level={level}

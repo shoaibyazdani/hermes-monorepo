@@ -70,16 +70,31 @@ async function playNext() {
     playNext();
   };
   audio.onerror = () => {
+    console.error("[voice-speaker] audio element error", next.id);
     setChunk(next.id, { status: "failed", error: "Audio playback error" });
     activeAudio = null;
     notify();
     playNext();
   };
   audio.play().catch((err) => {
-    setChunk(next.id, { status: "failed", error: String(err) });
+    // Distinguish autoplay-rejection (user must interact first — usually
+    // means the page just loaded and there's no user gesture yet) from real
+    // playback errors. We stop the queue on autoplay rejection so we don't
+    // spam the console; the user can re-toggle the speaker to retry.
+    const msg = err instanceof Error ? err.message : String(err);
+    const isAutoplay =
+      msg.toLowerCase().includes("autoplay") ||
+      msg.toLowerCase().includes("user activation") ||
+      msg.toLowerCase().includes("notallowed");
+    if (isAutoplay) {
+      console.warn("[voice-speaker] autoplay blocked — user gesture required", next.id);
+    } else {
+      console.error("[voice-speaker] play() failed", { id: next.id, err: msg });
+    }
+    setChunk(next.id, { status: "failed", error: isAutoplay ? "Autoplay blocked — click speaker again" : msg });
     activeAudio = null;
     notify();
-    playNext();
+    if (!isAutoplay) playNext();
   });
 }
 
@@ -132,10 +147,21 @@ export function useVoiceSpeaker() {
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
+        // Surface TTS server-side failures in the console so the user can
+        // see them in DevTools (browser audio is otherwise opaque).
+        console.warn(
+          "[voice-speaker] TTS request failed",
+          { id, status: res.status, body: detail.slice(0, 200) },
+        );
         setChunk(id, { status: "failed", error: `HTTP ${res.status}: ${detail.slice(0, 80)}` });
         return;
       }
       const blob = await res.blob();
+      if (blob.size === 0) {
+        console.warn("[voice-speaker] TTS returned empty blob", id);
+        setChunk(id, { status: "failed", error: "Empty audio response" });
+        return;
+      }
       const url = URL.createObjectURL(blob);
       setChunk(id, { status: "ready", url });
       // Kick the queue if nothing is playing.
