@@ -59,6 +59,7 @@ function resolveProvider(): ModelProvider | null {
       baseUrl: cfg.baseUrl,
       model: cfg.model,
       timeoutMs: cfg.timeoutMs,
+      thinkingEnabled: cfg.thinkingEnabled,
     });
   }
   if (cfg.provider === "cortex") {
@@ -571,6 +572,20 @@ You are answering the operator directly; no delegation was needed.`;
         ...runtimeBase,
         type: "message.delta",
         payload: { messageId, text: ev.text },
+        orchestrationId,
+        stepId: "synthesis",
+      } as OrchestratorEvent;
+    }
+    if (ev.kind === "reasoning") {
+      // Extended-thinking delta from the synthesis model. Surface as a
+      // reasoning event tagged with the orchestration id so the UI can
+      // show the planner's scratchpad while a delegated run is in flight.
+      yield {
+        id: nextId("evt"),
+        timestamp: new Date().toISOString(),
+        ...runtimeBase,
+        type: "reasoning.delta",
+        payload: { text: ev.text },
         orchestrationId,
         stepId: "synthesis",
       } as OrchestratorEvent;

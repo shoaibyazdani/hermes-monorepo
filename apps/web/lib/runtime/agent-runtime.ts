@@ -81,6 +81,7 @@ function resolveProvider(): ModelProvider | null {
       baseUrl: cfg.baseUrl,
       model: cfg.model,
       timeoutMs: cfg.timeoutMs,
+      thinkingEnabled: cfg.thinkingEnabled,
     });
   }
   if (cfg.provider === "cortex") {
@@ -217,6 +218,14 @@ export async function* executeAgent(
           }
           text += ev.text;
           yield emit("message.delta", { messageId, text: ev.text });
+          continue;
+        }
+
+        if (ev.kind === "reasoning") {
+          // Anthropic extended-thinking delta. Surface as a separate
+          // reasoning event so the UI can show it as a scratchpad or hide
+          // it. We don't merge reasoning into the visible message.
+          yield emit("reasoning.delta", { text: ev.text });
           continue;
         }
 

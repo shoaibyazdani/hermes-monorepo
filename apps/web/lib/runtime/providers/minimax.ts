@@ -21,6 +21,14 @@ export function createMiniMaxProvider(opts: {
   baseUrl: string;
   model: string;
   timeoutMs: number;
+  /**
+   * When true, send `thinking: { type: "adaptive" }` in the request body so
+   * MiniMax-M3 emits reasoning blocks before tool calls / final answers.
+   * The SSE consumer surfaces these as `reasoning` events for the UI.
+   * Default false to keep the request body stable; set to true once the
+   * runtime + UI can render reasoning.
+   */
+  thinkingEnabled: boolean;
 }): ModelProvider {
   return {
     id: "minimax",
@@ -46,6 +54,13 @@ export function createMiniMaxProvider(opts: {
             model: opts.model,
             max_tokens: request.maxTokens,
             system: request.system,
+            // Extended thinking: MiniMax-M3 declares reasoning:true but the
+            // provider was sending without this block. Adaptive lets the model
+            // decide how much reasoning to spend. The runtime emits `reasoning`
+            // events so the UI can show the scratchpad (or hide it).
+            ...(opts.thinkingEnabled
+              ? { thinking: { type: "adaptive" } }
+              : {}),
             messages: request.messages.map((m) => ({
               role: m.role,
               content: m.content,
@@ -146,6 +161,10 @@ async function* readAnthropicStream(
               json: "",
             });
           }
+          // Extended thinking arrives as a "thinking" block; the runtime emits
+          // a "reasoning" event for the UI to render. We don't track content
+          // for it (no deltas to accumulate; the runtime just shows the full
+          // text as it streams).
           continue;
         }
 
@@ -156,6 +175,9 @@ async function* readAnthropicStream(
           } else if (delta?.type === "input_json_delta") {
             const block = toolBlocks.get(frame.index);
             if (block) block.json += delta.partial_json ?? "";
+          } else if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
+            // Anthropic extended-thinking delta: surface as a reasoning event.
+            yield { kind: "reasoning", text: delta.thinking };
           }
           continue;
         }

@@ -26,6 +26,15 @@ export interface RuntimeConfig {
   maxTokens: number;
   /** Per-request timeout in ms. */
   timeoutMs: number;
+  /**
+   * Enable Anthropic-style extended thinking. MiniMax-M3 declares reasoning:
+   * true but the provider was sending requests without the thinking block —
+   * the model jumps straight to tool calls without a plan. Setting
+   * AI_THINKING_ENABLED=true (or `thinking: "enabled"` in the future) opts in.
+   * The model returns `thinking` blocks in the SSE stream which the runtime
+   * emits as `reasoning` events for the UI to display.
+   */
+  thinkingEnabled: boolean;
 }
 
 function env(name: string): string | undefined {
@@ -87,6 +96,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       supportsStreaming: true,
       maxTokens,
       timeoutMs,
+      thinkingEnabled: env("AI_THINKING_ENABLED") !== "false",  // on by default
     };
   }
 
@@ -101,6 +111,8 @@ export function getRuntimeConfig(): RuntimeConfig {
       supportsStreaming: false,
       maxTokens,
       timeoutMs,
+      // Cortex buffers the response, so reasoning isn't surfaced anyway.
+      thinkingEnabled: false,
     };
   }
 
@@ -112,6 +124,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     supportsStreaming: false,
     maxTokens,
     timeoutMs,
+    thinkingEnabled: false,
   };
 }
 

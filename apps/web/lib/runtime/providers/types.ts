@@ -39,6 +39,7 @@ export interface ModelRequest {
 export type ModelEvent =
   | { kind: "text"; text: string }
   | { kind: "tool-call"; toolCallId: string; toolId: string; input: unknown }
+  | { kind: "reasoning"; text: string }
   | { kind: "done" }
   | { kind: "error"; code: ModelErrorCode; message: string };
 

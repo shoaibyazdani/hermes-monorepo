@@ -13,6 +13,7 @@
 export type RuntimeEventType =
   | "run.started"
   | "agent.thinking"
+  | "reasoning.delta"
   | "message.started"
   | "message.delta"
   | "message.completed"
@@ -69,6 +70,15 @@ export type RuntimeEvent =
   | (RuntimeEventBase & {
       type: "agent.thinking";
       payload: { note?: string };
+    })
+  | (RuntimeEventBase & {
+      /**
+       * Anthropic-style extended-thinking delta. Streamed separately from the
+       * assistant message so the UI can show the scratchpad inline (or hide
+       * it). Toggled on by `AI_THINKING_ENABLED` in the runtime config.
+       */
+      type: "reasoning.delta";
+      payload: { text: string };
     })
   | (RuntimeEventBase & {
       type: "message.started";
