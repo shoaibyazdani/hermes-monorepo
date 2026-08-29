@@ -63,7 +63,22 @@ export function createMiniMaxProvider(opts: {
               : {}),
             messages: request.messages.map((m) => ({
               role: m.role,
-              content: m.content,
+              // Pass text straight through; map content-block arrays to
+              // Anthropic's structured content shape (text + image base64).
+              content: typeof m.content === "string"
+                ? m.content
+                : m.content.map((b) =>
+                    b.type === "text"
+                      ? { type: "text", text: b.text }
+                      : {
+                          type: "image",
+                          source: {
+                            type: "base64",
+                            media_type: b.mediaType,
+                            data: b.data,
+                          },
+                        }
+                  ),
             })),
             stream: true,
             ...(request.tools?.length

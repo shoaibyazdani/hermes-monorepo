@@ -3,6 +3,7 @@ import { getAgentDefinition, isKnownAgent } from "./agents/definitions";
 import { createMiniMaxProvider } from "./providers/minimax";
 import { createCortexProvider } from "./providers/cortex";
 import type {
+  ContentBlock,
   ModelEvent,
   ModelMessage,
   ModelProvider,
@@ -30,7 +31,13 @@ import type { RuntimeErrorCode, RuntimeEvent } from "./events";
 export interface AgentRequest {
   agentId: string;
   conversationId: string;
-  message: string;
+  /**
+   * The user's current turn — text only OR multimodal (text + image blocks).
+   * Set by `parseRequest` in `/api/runtime/execute/route.ts` based on whether
+   * `attachments` were supplied. The runtime prepends this turn to the
+   * conversation history.
+   */
+  message: string | ContentBlock[];
   missionId?: string;
   /** Prior turns, oldest first. Assembled by the caller and already trimmed. */
   history?: ModelMessage[];

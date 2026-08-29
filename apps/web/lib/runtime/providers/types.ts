@@ -8,8 +8,34 @@
 
 export interface ModelMessage {
   role: "user" | "assistant";
-  content: string;
+  /**
+   * Either a plain text turn (most common) or a structured content block list
+   * for multimodal messages (text + image blocks). MiniMax-M3 / Claude
+   * accept both shapes; the provider maps the block list to the Anthropic
+   * `content: [{type:"text",...},{type:"image",...}]` shape.
+   *
+   * Validation enforces a hard cap on total bytes per message in
+   * `app/api/runtime/execute/route.ts` so a runaway upload can't blow the
+   * 200K context window.
+   */
+  content: string | ContentBlock[];
 }
+
+/**
+ * One part of a multimodal message. Only `text` and `image` (base64) are
+ * accepted; other Anthropic block types (`tool_use`, `tool_result`,
+ * `document`, `audio`, `video`) are deliberately unsupported here so the
+ * runtime surface stays narrow.
+ */
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      /** MIME type — image/jpeg, image/png, image/gif, image/webp. */
+      mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+      /** Raw base64 (no data: prefix). Server strips the prefix on receive. */
+      data: string;
+    };
 
 /** A tool offered to the model, in provider-neutral form. */
 export interface ModelToolSpec {

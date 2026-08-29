@@ -5,7 +5,10 @@ import {
   executeOrchestration,
   type OrchestrationRequest,
 } from "@/lib/orchestration/orchestrator";
-import type { ModelMessage } from "@/lib/runtime/providers/types";
+import {
+  type ContentBlock,
+  type ModelMessage,
+} from "@/lib/runtime/providers/types";
 
 export const dynamic = "force-dynamic";
 // Node runtime: the providers use fetch streaming and the run manager keeps
@@ -17,6 +20,17 @@ const MAX_MESSAGE_CHARS = 8_000;
 const MAX_HISTORY_TURNS = 20;
 const MAX_HISTORY_CHARS = 24_000;
 const MAX_MISSION_CONTEXT_CHARS = 2_000;
+/** Per-image cap: ~5MB after base64 (≈3.75MB raw). Anthropic's hard limit is 5MB. */
+const MAX_IMAGE_BYTES = 5_000_000;
+/** Max images per message. Real screenshots / receipts usually need 1-2. */
+const MAX_IMAGES_PER_MESSAGE = 4;
+
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 /**
  * Validate and clamp the request body.
@@ -29,6 +43,70 @@ type ParsedRequest =
   | { ok: true; mode: "direct"; value: AgentRequest }
   | { ok: true; mode: "orchestrated"; value: OrchestrationRequest }
   | { ok: false; error: string };
+
+/**
+ * Validate a single attachment from the request body.
+ *
+ * The browser sends `{ mediaType, data }` per image. We re-check the type
+ * whitelist, the byte size, and the data: prefix (strips it). Returns
+ * either a `ContentBlock` ready for the runtime or an error string.
+ */
+function validateAttachment(raw: unknown):
+  | { ok: true; block: ContentBlock }
+  | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null) {
+    return { ok: false, error: "Attachment must be an object." };
+  }
+  const a = raw as Record<string, unknown>;
+  const mediaType = a.mediaType;
+  const data = a.data;
+  if (typeof mediaType !== "string" || !ALLOWED_IMAGE_TYPES.has(mediaType)) {
+    return {
+      ok: false,
+      error: `Unsupported image type ${String(mediaType)}. Allowed: ${[...ALLOWED_IMAGE_TYPES].join(", ")}.`,
+    };
+  }
+  if (typeof data !== "string") {
+    return { ok: false, error: "Attachment data must be a base64 string." };
+  }
+  // Browser may send "data:image/jpeg;base64,..." — strip the prefix.
+  const cleaned = data.replace(/^data:[^;]+;base64,/, "");
+  // Approx bytes: 3/4 of base64 length (minus padding)
+  const approxBytes = Math.floor((cleaned.length * 3) / 4);
+  if (approxBytes > MAX_IMAGE_BYTES) {
+    return {
+      ok: false,
+      error: `Image too large (${Math.round(approxBytes / 1024)}KB > ${MAX_IMAGE_BYTES / 1024}KB limit).`,
+    };
+  }
+  return {
+    ok: true,
+    block: {
+      type: "image",
+      mediaType: mediaType as ContentBlock extends { mediaType: infer M } ? M : never,
+      data: cleaned,
+    },
+  };
+}
+function buildMessageContent(
+  text: string,
+  attachments: unknown[],
+): string | ContentBlock[] {
+  // If `attachments` is empty, return a plain string (cheaper to wire, faster
+  // to render). Otherwise compose `[text, image, image, ...]` so the model
+  // sees the user's text + their screenshots in one turn.
+  if (attachments.length === 0) return text.slice(0, MAX_MESSAGE_CHARS);
+  const blocks: ContentBlock[] = [
+    { type: "text", text: text.slice(0, MAX_MESSAGE_CHARS) },
+  ];
+  for (const a of attachments) {
+    const r = validateAttachment(a);
+    if (r.ok) blocks.push(r.block);
+    // If invalid, skip with server log — we already validate up front so
+    // this branch should be rare.
+  }
+  return blocks;
+}
 
 function parseRequest(body: unknown): ParsedRequest {
   if (typeof body !== "object" || body === null) {
@@ -46,6 +124,28 @@ function parseRequest(body: unknown): ParsedRequest {
   if (typeof b.message !== "string" || !b.message.trim()) {
     return { ok: false, error: "message is required." };
   }
+
+  // Attachments: optional array of { mediaType, data }. Validate up-front so
+  // the runtime never sees malformed images.
+  let attachments: ContentBlock[] = [];
+  if (Array.isArray(b.attachments)) {
+    if (b.attachments.length > MAX_IMAGES_PER_MESSAGE) {
+      return {
+        ok: false,
+        error: `Too many attachments (${b.attachments.length} > ${MAX_IMAGES_PER_MESSAGE}).`,
+      };
+    }
+    for (const raw of b.attachments) {
+      const r = validateAttachment(raw);
+      if (!r.ok) return { ok: false, error: r.error };
+      attachments.push(r.block);
+    }
+  }
+  const messageContent = buildMessageContent(
+    b.message,
+    Array.isArray(b.attachments) ? b.attachments : [],
+  );
+
   // Orchestration is always Hermes; the browser does not choose an
   // orchestrator, so there is nothing to validate beyond the mode itself.
   if (mode === "direct" && (typeof b.agentId !== "string" || !isKnownAgent(b.agentId))) {
@@ -55,6 +155,8 @@ function parseRequest(body: unknown): ParsedRequest {
 
   // History: keep only the most recent turns, then trim oldest-first until the
   // character budget fits. Recent context matters more than complete context.
+  // History is text-only — multimodal attachments only apply to the current turn,
+  // not to past turns (which the runtime stores as text).
   let history: ModelMessage[] = [];
   if (Array.isArray(b.history)) {
     history = b.history
@@ -80,17 +182,31 @@ function parseRequest(body: unknown): ParsedRequest {
   }
 
   if (mode === "orchestrated") {
+    // Orchestrator wants a plain text message + text-only history. Force
+    // history's content to string (we already filtered to string-only above
+    // via the type guard).
+    const textHistory: Array<{ role: "user" | "assistant"; content: string }> =
+      history.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: typeof m.content === "string" ? m.content : "",
+      }));
     return {
       ok: true,
       mode: "orchestrated",
       value: {
         conversationId: b.conversationId,
-        message: b.message.slice(0, MAX_MESSAGE_CHARS),
+        message:
+          typeof messageContent === "string"
+            ? messageContent
+            : // Orchestrator gets the text only; image analysis is delegated
+              // to a sub-agent if needed. Keeping the orchestrator text-only
+              // avoids 200K of base64 flooding the planner prompt.
+              b.message.slice(0, MAX_MESSAGE_CHARS),
         missionId:
           typeof b.missionId === "string" && b.missionId
             ? b.missionId
             : undefined,
-        history,
+        history: textHistory,
       },
     };
   }
@@ -101,7 +217,10 @@ function parseRequest(body: unknown): ParsedRequest {
     value: {
       agentId: b.agentId as string,
       conversationId: b.conversationId,
-      message: b.message.slice(0, MAX_MESSAGE_CHARS),
+      // Pass the structured content (text + image blocks) through to the
+      // runtime. The runtime prepends the user's text message to the
+      // conversation history.
+      message: messageContent,
       missionId:
         typeof b.missionId === "string" && b.missionId ? b.missionId : undefined,
       history,

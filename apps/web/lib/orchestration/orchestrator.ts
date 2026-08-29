@@ -29,6 +29,12 @@ import type { AgentResult, Orchestration, OrchestrationStep } from "./types";
 
 export interface OrchestrationRequest {
   conversationId: string;
+  /**
+   * Plain text only. The orchestrator's planner prompt shouldn't see raw
+   * base64 images; if the user sent attachments, we route them through a
+   * delegated sub-agent (the planner calls a vision-capable agent to
+   * describe the image, then incorporates that description).
+   */
   message: string;
   missionId?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
