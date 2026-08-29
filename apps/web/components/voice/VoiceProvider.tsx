@@ -4,12 +4,44 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useVoice, VoiceEvent, type VoiceState } from "@/hooks/useVoice";
 import type { VoicePhase, VoiceTarget } from "@/lib/types";
+
+/**
+ * Global event the voice engine fires when a transcript segment settles.
+ *
+ * ConversationProvider listens for this and pipes the text through
+ * `routeCommand`. Kept as a window event so the two providers don't have to
+ * be re-architected (VoiceProvider is the outer provider; ConversationProvider
+ * is inner and owns routeCommand).
+ *
+ * Detail:
+ *   - `text`:  the finalized transcript for this segment
+ *   - `isFinal`: true if SpeechRecognition marked this as the final result; false
+ *     if it's an interim update (used to suppress routing while still talking).
+ */
+export interface VoiceTranscriptDetail {
+  text: string;
+  isFinal: boolean;
+}
+
+export const VOICE_TRANSCRIPT_EVENT = "hermes:voice-transcript";
+
+/**
+ * Dispatch a transcript segment to anyone listening on `window`. ConversationProvider
+ * subscribes via `useEffect` and pipes the text through `routeCommand`.
+ */
+export function dispatchTranscript(detail: VoiceTranscriptDetail) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<VoiceTranscriptDetail>(VOICE_TRANSCRIPT_EVENT, { detail }),
+  );
+}
 
 export interface Agent {
   id: string;

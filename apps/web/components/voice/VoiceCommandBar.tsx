@@ -154,6 +154,29 @@ export function VoiceCommandBar() {
   // Keep the highlighted option in range as the filter narrows.
   useEffect(() => setHighlight(0), [mention?.partial]);
 
+  /**
+   * Mirror `activeAgentId` to localStorage so the voice-transcript listener
+   * in ConversationProvider can read which agent is the current target
+   * without needing a cross-context refactor. Keeping the two providers
+   * decoupled is the cleaner architectural choice for now.
+   *
+   * Key sync strategy:
+   *   - On mount: read the existing value (preserves across reloads).
+   *   - On change: write the new value (the `storage` event would only
+   *     fire on OTHER tabs, not this one, so we write explicitly).
+   */
+  useEffect(() => {
+    try {
+      if (activeAgentId) {
+        window.localStorage.setItem("hermes:activeTarget", activeAgentId);
+      } else {
+        window.localStorage.removeItem("hermes:activeTarget");
+      }
+    } catch {
+      // ignore — SSR, private mode, quota, etc.
+    }
+  }, [activeAgentId]);
+
   // Restore the caret after a mention completion rewrites the input value.
   useLayoutEffect(() => {
     const caret = pendingCaretRef.current;

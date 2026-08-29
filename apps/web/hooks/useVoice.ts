@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  VOICE_TRANSCRIPT_EVENT,
+  dispatchTranscript,
+  type VoiceTranscriptDetail,
+} from "@/components/voice/VoiceProvider";
 
 export type VoiceState = "idle" | "requesting" | "listening" | "error";
 export type VoiceEvent =
@@ -8,6 +13,12 @@ export type VoiceEvent =
   | { kind: "hearing"; level: number }
   | { kind: "silent"; level: number }
   | { kind: "error"; message: string };
+
+// Re-export so consumers that already import from "@/hooks/useVoice" don't
+// have to also import from VoiceProvider. The single source of truth lives
+// in VoiceProvider; this is just a convenience pass-through.
+export { VOICE_TRANSCRIPT_EVENT };
+export type { VoiceTranscriptDetail };
 
 interface UseVoiceOptions {
   onEvent?: (event: VoiceEvent) => void;
@@ -185,38 +196,86 @@ export function useVoice({ onEvent }: UseVoiceOptions = {}): UseVoiceReturn {
         }
       }, VAD_POLL_MS);
 
-      // 5. SpeechRecognition (interim transcript) — guarded try/catch because
-      //    some browsers throw synchronously when start() is called twice or
-      //    while another recognition session is active.
-      const SR =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-      if (SR) {
-        const rec = new SR();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = "en-US";
-        rec.onresult = (_e: any) => {
-          // Phase 1 stub: real transcript wiring is Phase 2.
-        };
-        try {
-          rec.start();
-        } catch {
-          // Synchronous throw — release resources to avoid a leak.
-          stop();
-          startInFlightRef.current = false;
-          const msg = "Speech recognition failed to start. Reload and retry.";
-          setErrorMessage(msg);
-          setState("error");
-          emit({ kind: "error", message: msg });
-          return false;
-        }
-        recognitionRef.current = rec;
-      }
+      // 5. SpeechRecognition (interim + final transcript) — the engine
+            //    fires a `hermes:voice-transcript` CustomEvent on `window` for
+            //    each result. ConversationProvider subscribes and routes the
+            //    final transcript through `routeCommand` so the agent actually
+            //    receives the spoken text.
+            const SR =
+              (window as any).SpeechRecognition ||
+              (window as any).webkitSpeechRecognition;
+            if (SR) {
+              const rec = new SR();
+              rec.continuous = true;
+              rec.interimResults = true;
+              rec.lang = "en-US";
+              /**
+               * Accumulated text for the current utterance. Browser SpeechRecognition
+               * can emit multiple `result` events per utterance (one per pause /
+               * finality boundary). We rebuild the full transcript by concatenating
+               * the latest (final OR interim) transcript of every SpeechRecognitionResult
+               * in the event.results array — exactly how the Web Speech API spec
+               * documents building stable text.
+               */
+              rec.onresult = (event: any) => {
+                let assembled = "";
+                let lastIsFinal = false;
+                for (let i = 0; i < event.results.length; i++) {
+                  const r = event.results[i];
+                  // r[0] = best alternative; transcript text comes from .transcript
+                  const candidate = r[0]?.transcript ?? "";
+                  assembled += candidate;
+                  if (r.isFinal) lastIsFinal = true;
+                }
+                const text = assembled.trim();
+                if (!text) return;
+                dispatchTranscript({ text, isFinal: lastIsFinal });
+              };
+              rec.onerror = (e: any) => {
+                // Most common: 'no-speech' (silence longer than the SR threshold),
+                // 'aborted' (we called abort()), 'audio-capture' (mic issue).
+                // 'no-speech' is benign — the silence timer will re-arm.
+                if (e?.error === "no-speech" || e?.error === "aborted") return;
+                // Real errors surface as state.error + a VoiceEvent so the UI can show it.
+                const msg = `Speech recognition error: ${e?.error ?? "unknown"}`;
+                setErrorMessage(msg);
+                emit({ kind: "error", message: msg });
+              };
+              rec.onend = () => {
+                // Some browsers (Safari) fire onend when continuous SR stops after
+                // a long pause. We don't change state here — useVoice.start/stop
+                // owns the lifecycle; the listener is just here for completeness.
+              };
+              try {
+                rec.start();
+              } catch {
+                // Synchronous throw — release resources to avoid a leak.
+                stop();
+                startInFlightRef.current = false;
+                const msg = "Speech recognition failed to start. Reload and retry.";
+                setErrorMessage(msg);
+                setState("error");
+                emit({ kind: "error", message: msg });
+                return false;
+              }
+              recognitionRef.current = rec;
+            } else {
+              // No SpeechRecognition API in this browser (Firefox / iOS WebView < 14.1).
+              // Surface as a state-level error so the UI can prompt the user to type
+              // instead of waiting for a transcript that will never come.
+              const msg =
+                "Speech recognition not supported in this browser. Use the text command line instead.";
+              setErrorMessage(msg);
+              setState("error");
+              emit({ kind: "error", message: msg });
+              // Don't return false — the mic / VAD / waveform still works for level
+              // indication, the user can keep speaking for show even if SR isn't
+              // available. They just need to repeat themselves as text.
+            }
 
-      setState("listening");
-      emit({ kind: "listening" });
-      return true;
+            setState("listening");
+            emit({ kind: "listening" });
+            return true;
     } catch (e: any) {
       const name = e?.name || "";
       let msg = "Microphone blocked";

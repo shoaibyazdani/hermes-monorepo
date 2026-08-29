@@ -29,6 +29,10 @@ import type { RuntimeEvent } from "@/lib/runtime/events";
 import { isOrchestrationEvent } from "@/lib/orchestration/events";
 import { simulationTranscriptAt } from "@/lib/orchestration/simulation-view";
 import { useVoiceSpeaker } from "@/hooks/useVoiceSpeaker";
+import {
+  VOICE_TRANSCRIPT_EVENT,
+  type VoiceTranscriptDetail,
+} from "@/components/voice/VoiceProvider";
 import { SIM_CONVERSATION_IDS } from "@/lib/orchestration/simulation";
 import { SIMULATION_INITIAL_STEP } from "@/lib/operations/mock-operations";
 import type {
@@ -1006,7 +1010,87 @@ export function ConversationProvider({
       };
     },
     [activeConversationId, ensureActive, sendMessage, startConversation],
-  );
+      );
+
+      /**
+       * Listen for finalized voice transcripts and route them through the same
+       * pipeline as typed text. Wired via a CustomEvent (declared in
+       * VoiceProvider.tsx) so the two providers — Voice (outer) ↔ Conversation
+       * (inner) — don't have to be re-architected to share state.
+       *
+       * Why only `isFinal`:
+       *   - SpeechRecognition emits interim results every ~50ms while the user is
+       *     still talking. Routing on every interim would send half-spoken text
+       *     to the agent, who'd respond before the user finishes.
+       *   - The browser sets `isFinal: true` only when the user pauses
+       *     (default silence ≈1s) or when we explicitly stop the mic. That's the
+       *     right moment to ship the command.
+       *
+       * Why a `lastFinalRef`:
+       *   - Silence auto-flush calls `rec.stop()` then `rec.start()` to re-arm.
+       *     On some engines the final transcript fires TWICE (once for the stopped
+       *     session, once for the new one with the same text). The ref dedupes
+       *     against the most recent final so we route at most once per utterance.
+       *
+       * The `agents` argument is intentionally empty: parseCommand with [] falls
+       * back to `currentTargetId` (which VoiceProvider tracks via setActiveAgentId),
+       * so a transcript that names an agent with `@apex` still parses correctly
+       * (parseCommand normalizes against the input only for that match), and one
+       * that doesn't will route to whichever agent the user has currently targeted.
+       */
+      const lastFinalRef = useRef<{ text: string; at: number } | null>(null);
+      /**
+       * VoiceProvider lives above us and exposes `activeAgentId` via its own
+       * context. We mirror it here via a window-level storage key so this listener
+       * can read it without a context refactor — the command bar sets it on every
+       * `setActiveAgentId` call.
+       */
+      const activeAgentIdRef = useRef<string | null>(null);
+      useEffect(() => {
+        function readActive() {
+          try {
+            const v = window.localStorage.getItem("hermes:activeTarget");
+            activeAgentIdRef.current = v ?? null;
+          } catch {
+            // ignore — SSR, private mode, etc.
+          }
+        }
+        readActive();
+        window.addEventListener("storage", readActive);
+        return () => window.removeEventListener("storage", readActive);
+      }, []);
+      useEffect(() => {
+        function onTranscript(event: Event) {
+          const e = event as CustomEvent<VoiceTranscriptDetail>;
+          const detail = e.detail;
+          if (!detail?.text) return;
+          // Only route on finalized transcripts — interim results are still
+          // changing and will fire `isFinal` once the user pauses.
+          if (!detail.isFinal) return;
+
+          const text = detail.text.trim();
+          if (!text) return;
+
+          // Dedup within ~3s — SpeechRecognition can re-emit the same final
+          // transcript when SR is auto-restarted by the silence timer.
+          const now = Date.now();
+          const last = lastFinalRef.current;
+          if (last && last.text === text && now - last.at < 3000) return;
+          lastFinalRef.current = { text, at: now };
+
+          // Fire-and-forget: the routeCommand result is logged to the
+          // command-bar UI by VoiceCommandBar, not by ConversationProvider.
+          // Errors here would be silent (no consumer) — at minimum log so the
+          // user can see something in DevTools.
+          void routeCommand(text, [], activeAgentIdRef.current).catch((err) => {
+            console.error("[voice-transcript] routeCommand failed", { text, err });
+          });
+        }
+        window.addEventListener(VOICE_TRANSCRIPT_EVENT, onTranscript);
+        return () => {
+          window.removeEventListener(VOICE_TRANSCRIPT_EVENT, onTranscript);
+        };
+      }, [routeCommand]);
 
   const resetStore = useCallback(() => {
     skipPersist.current = true;
