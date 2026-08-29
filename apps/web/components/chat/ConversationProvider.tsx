@@ -28,6 +28,7 @@ import {
 import type { RuntimeEvent } from "@/lib/runtime/events";
 import { isOrchestrationEvent } from "@/lib/orchestration/events";
 import { simulationTranscriptAt } from "@/lib/orchestration/simulation-view";
+import { useVoiceSpeaker } from "@/hooks/useVoiceSpeaker";
 import { SIM_CONVERSATION_IDS } from "@/lib/orchestration/simulation";
 import { SIMULATION_INITIAL_STEP } from "@/lib/operations/mock-operations";
 import type {
@@ -110,6 +111,18 @@ interface ConversationContextValue {
    * each agent's OWN conversation, and only the summary appears here.
    */
   orchestrate: (conversationId: string, body: string) => void;
+
+  /* ── Live-talk speaker ───────────────────────────────────────────────── */
+  /** When enabled, the agent's text is spoken aloud as it streams. */
+  speakerEnabled: boolean;
+  /** Toggle the speaker on/off. Disabled = silent typing only. */
+  toggleSpeaker: () => void;
+  /** Stop the currently-playing sentence (does not pause text streaming). */
+  stopSpeaker: () => void;
+  /** Id of the chunk currently being played, for UI indicators. */
+  speakerNowPlayingId: string | null;
+  /** How many sentences are queued or loading. */
+  speakerQueueLength: number;
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null);
@@ -142,6 +155,21 @@ export function ConversationProvider({
    * must be projections of one step, not two counters that can drift.
    */
   const [simulationStep, setSimulationStep] = useState(SIMULATION_INITIAL_STEP);
+
+  /**
+   * Live-talk speaker. When enabled, every complete sentence in the streaming
+   * agent response is POSTed to /api/tts-stream and queued for browser
+   * playback. Disabled by default — the user flips it on via the chat header
+   * toggle.
+   *
+   * Speaker module is a singleton (the queue lives at module scope inside
+   * useVoiceSpeaker) so multiple components can enqueue safely and the queue
+   * survives React re-renders.
+   */
+  const speaker = useVoiceSpeaker();
+  // Track which conversationId each sentence belongs to so we can clear the
+  // queue when the user starts a new turn / interrupts with mic.
+  const speakerConvoRef = useRef<string | null>(null);
 
   // Guards the persist effect so hydration itself does not trigger a write.
   const skipPersist = useRef(true);
@@ -629,11 +657,30 @@ export function ConversationProvider({
             case "message.delta":
               buffer += event.payload.text;
               schedule();
+              // Live-talk: split the buffer at sentence boundaries and feed
+              // each complete sentence to the speaker. Disabled if the user
+              // hasn't enabled the speaker or the queue is full.
+              if (speaker.enabled) {
+                speakerConvoRef.current = conversationId;
+                const split = splitSentences(buffer);
+                if (split.complete.length > 0 && split.remainder !== buffer) {
+                  for (const s of split.complete) {
+                    void speaker.enqueueSentence(s);
+                  }
+                  buffer = split.remainder;
+                }
+              }
               break;
 
             case "message.completed":
               if (frame !== null) cancelAnimationFrame(frame);
               frame = null;
+              // Flush any remaining sentence fragments to the speaker so the
+              // user hears the final words of the response (e.g. trailing
+              // "Thanks!" or short acknowledgements that don't end in punctuation).
+              if (speaker.enabled && buffer.trim()) {
+                void speaker.enqueueSentence(buffer);
+              }
               buffer = "";
               patchMessage(conversationId, assistantId, {
                 body: event.payload.text,
@@ -992,6 +1039,11 @@ export function ConversationProvider({
       orchestrate,
       simulationStep,
       setSimulationStep,
+      speakerEnabled: speaker.enabled,
+      toggleSpeaker: speaker.toggle,
+      stopSpeaker: speaker.stop,
+      speakerNowPlayingId: speaker.nowPlayingId,
+      speakerQueueLength: speaker.queueLength,
     }),
     [
       allConversations,
@@ -1022,6 +1074,70 @@ export function ConversationProvider({
       {children}
     </ConversationContext.Provider>
   );
+}
+
+/**
+ * Split a streaming text buffer at sentence boundaries.
+ *
+ * Returns the sentences that are complete (end in `.` `!` or `?` followed
+ * by whitespace or end-of-string) plus the trailing remainder that hasn't
+ * finished yet. We never split mid-word, never split inside a list bullet,
+ * and never emit a fragment shorter than the trailing remainder itself
+ * (no point committing "H" if more text is coming).
+ *
+ * Conservative by design: we prefer fewer, longer sentences over many short
+ * fragments — ElevenLabs handles long sentences well, and skipping a
+ * mid-sentence fragment prevents glitchy cutoffs.
+ *
+ * Short trailing fragments ("Yes.", "Done.") DO get committed when the
+ * remainder is empty, so the final words of an answer aren't dropped.
+ */
+// Avoid splitting on periods inside common abbreviations so we don't
+// mistake "Dr." or "e.g." for sentence ends.
+const ABBREVIATIONS = /\b(?:Dr|Mr|Mrs|Ms|St|vs|etc|e\.g|i\.e)\.$/;
+
+function splitSentences(buffer: string): { complete: string[]; remainder: string } {
+  if (!buffer) return { complete: [], remainder: "" };
+  const complete: string[] = [];
+  let remainder = buffer;
+
+  // Walk through the buffer and look for terminal punctuation followed by a
+  // word boundary (space or EOL). The loop stops at the first such match.
+  let idx = -1;
+  for (let i = 0; i < remainder.length; i++) {
+    const ch = remainder[i];
+    if (ch !== "." && ch !== "!" && ch !== "?") continue;
+    // Skip abbreviations like "Dr." or "e.g." so we don't mis-split.
+    const tail = remainder.slice(Math.max(0, i - 4), i + 1);
+    if (ABBREVIATIONS.test(tail)) continue;
+    // Require a word boundary after the punctuation so "10.5" doesn't
+    // trigger a split. Sentence ending at end-of-buffer also counts.
+    const next = remainder[i + 1];
+    if (next !== undefined && next !== " " && next !== "\n") continue;
+    idx = i;
+    break;
+  }
+  if (idx === -1) return { complete: [], remainder };
+
+  // Slice off the sentence up to and including the terminal punctuation.
+  // Always push it — even short fragments like "Yes." or "OK." are valid
+  // sentences when followed by a sentence boundary. (If the buffer is
+  // mid-stream we *don't* want to push partial words, but by this point
+  // we've already confirmed there's a terminal punctuation followed by a
+  // word boundary, so this IS a real sentence.)
+  const sentence = remainder.slice(0, idx + 1).trim();
+  remainder = remainder.slice(idx + 1).replace(/^\s+/, "");
+
+  complete.push(sentence);
+
+  // Recurse on the remainder — the buffer may contain multiple completed
+  // sentences (e.g. "Hello. World!"). Keep splitting until none remain.
+  if (remainder.length > 0) {
+    const tail = splitSentences(remainder);
+    complete.push(...tail.complete);
+    remainder = tail.remainder;
+  }
+  return { complete, remainder };
 }
 
 export function useConversations(): ConversationContextValue {
